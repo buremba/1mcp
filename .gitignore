@@ -36,3 +36,8 @@ coverage/
 *.log
 tmp/
 temp/
+*.bak
+
+# Compiled files in source directories
+packages/shared/src/**/*.js
+packages/shared/src/**/*.d.ts

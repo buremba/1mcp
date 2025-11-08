@@ -7,7 +7,6 @@ import { nanoid } from "nanoid";
 import type { RunJsParams, BackchannelEvent, RelayConfig } from "@1mcp/shared";
 import { CapsuleBuilder } from "../capsule/builder.js";
 import { NodeExecutor } from "../harness/executor.js";
-// import { AiSdkToolLoader } from "../services/ai-sdk-tool-loader.js";
 import { readFile, writeFile, readdir } from "node:fs/promises";
 import { resolve, join, relative, normalize } from "node:path";
 
@@ -67,8 +66,7 @@ export function setupMcpEndpoint(
   capsuleBuilder: CapsuleBuilder,
   sessionManager: any,
   nodeExecutor: NodeExecutor,
-  config: RelayConfig,
-  aiSdkToolLoader?: any // AiSdkToolLoader
+  config: RelayConfig
 ) {
   app.post("/mcp", async (c: Context) => {
     try {
@@ -211,14 +209,11 @@ export function setupMcpEndpoint(
               },
             ];
 
-        // Add AI SDK tools if loader is available
-        const aiSdkTools = aiSdkToolLoader ? aiSdkToolLoader.listTools() : [];
-
         return c.json({
           jsonrpc: "2.0",
           id,
           result: {
-            tools: [...builtInTools, ...aiSdkTools],
+            tools: builtInTools,
           },
         });
       }
@@ -568,33 +563,6 @@ export function setupMcpEndpoint(
               error: {
                 code: -32603,
                 message: `Search failed: ${error}`,
-              },
-            });
-          }
-        } else if (aiSdkToolLoader && aiSdkToolLoader.hasTool(toolName)) {
-          // Execute AI SDK tool
-          try {
-            const result = await aiSdkToolLoader.executeTool(toolName, toolArgs || {});
-
-            return c.json({
-              jsonrpc: "2.0",
-              id,
-              result: {
-                content: [
-                  {
-                    type: "text",
-                    text: typeof result === "string" ? result : JSON.stringify(result, null, 2),
-                  },
-                ],
-              },
-            });
-          } catch (error) {
-            return c.json({
-              jsonrpc: "2.0",
-              id,
-              error: {
-                code: -32603,
-                message: `AI SDK tool execution failed: ${error instanceof Error ? error.message : String(error)}`,
               },
             });
           }

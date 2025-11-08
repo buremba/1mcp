@@ -36,30 +36,27 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "commander": "^12.0.0",
-    "kleur": "^4.1.5",
-    "open": "^10.0.0",
-    "hono": "^4.0.0",
+    "@1mcp/ai-sdk": "workspace:*",
+    "@1mcp/shared": "workspace:*",
     "@hono/node-server": "^1.13.0",
-    "undici": "^7.0.0",
-    "ajv": "^8.12.0",
-    "ajv-formats": "^3.0.1",
-    "jose": "^5.2.0",
-    "pino": "^9.0.0",
-    "pino-pretty": "^11.0.0",
-    "nanoid": "^5.0.0",
+    "commander": "^12.0.0",
     "esbuild": "^0.24.0",
     "fflate": "^0.8.2",
-    "quickjs-emscripten": "^0.30.0",
-    "isolated-vm": "^5.0.1",
-    "tldts": "^6.1.0",
+    "hono": "^4.0.0",
     "ipaddr.js": "^2.2.0",
-    "@1mcp/shared": "workspace:*",
-    "@1mcp/ai-sdk": "workspace:*"
+    "jose": "^5.2.0",
+    "kleur": "^4.1.5",
+    "nanoid": "^5.0.0",
+    "open": "^10.0.0",
+    "pino": "^9.0.0",
+    "pino-pretty": "^11.0.0",
+    "quickjs-emscripten": "^0.30.0",
+    "tldts": "^6.1.0",
+    "undici": "^7.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "typescript": "^5.8.3",
-    "tsx": "^4.19.0"
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.3"
   }
 }

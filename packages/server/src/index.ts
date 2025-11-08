@@ -11,7 +11,6 @@ import { SessionManager } from "./services/session-manager.js";
 import { CapsuleBuilder } from "./capsule/builder.js";
 import { MCPManager } from "./services/mcp-manager.js";
 import { CapsuleCleanupService } from "./services/capsule-cleanup.js";
-// import { AiSdkToolLoader } from "./services/ai-sdk-tool-loader.js";
 import { NodeExecutor } from "./harness/executor.js";
 import { setupMcpEndpoint } from "./endpoints/mcp.js";
 import { setupSessionEndpoints } from "./endpoints/session.js";
@@ -79,17 +78,8 @@ export async function startServer(serverConfig: ServerConfig) {
   cleanupService.start();
   log.info("Capsule cleanup service started");
 
-  // Initialize AI SDK tool loader if configured
-  // let aiSdkToolLoader: AiSdkToolLoader | undefined;
-  // if (serverConfig.config.aiSdkTools && serverConfig.config.aiSdkTools.length > 0) {
-  //   log.info("Initializing AI SDK tool loader...");
-  //   aiSdkToolLoader = new AiSdkToolLoader(process.cwd());
-  //   await aiSdkToolLoader.loadTools(serverConfig.config.aiSdkTools);
-  //   log.info(`AI SDK tools loaded: ${aiSdkToolLoader.getToolCount()} tool(s)`);
-  // }
-
   // Setup endpoints
-  setupMcpEndpoint(app, capsuleBuilder, sessionManager, nodeExecutor, serverConfig.config, undefined);
+  setupMcpEndpoint(app, capsuleBuilder, sessionManager, nodeExecutor, serverConfig.config);
   setupSessionEndpoints(app, sessionManager);
   setupCapsuleEndpoints(app, capsuleBuilder);
   setupMcpsRpcEndpoint(app, mcpManager);
