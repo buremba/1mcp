@@ -1,0 +1,16 @@
+/**
+ * @1mcp/shared - Shared types, schemas, and constants
+ */
+
+// Export all types
+export * from "./types/index.js";
+
+// Export constants
+export * from "./constants.js";
+
+// Export JSON schemas (for runtime validation with ajv)
+// Note: JSON imports will be handled by bundler/runtime
+export const schemas = {
+  capsule: {}, // TODO: load schema dynamically if needed
+  relayConfig: {}, // TODO: load schema dynamically if needed
+};

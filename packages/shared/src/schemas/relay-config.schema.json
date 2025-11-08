@@ -1,0 +1,86 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RelayConfig",
+  "type": "object",
+  "required": ["language", "policy", "mcps"],
+  "properties": {
+    "language": {
+      "type": "string",
+      "enum": ["js", "py"]
+    },
+    "npm": {
+      "type": "object",
+      "properties": {
+        "dependencies": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "lockfile": {
+          "type": "string"
+        }
+      }
+    },
+    "pip": {
+      "type": "object",
+      "properties": {
+        "requirements": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "wheelUrls": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      }
+    },
+    "policy": {
+      "type": "object"
+    },
+    "mcps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "transport"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "transport": {
+            "type": "string",
+            "enum": ["http", "stdio"]
+          },
+          "endpoint": {
+            "type": "string",
+            "format": "uri"
+          },
+          "command": {
+            "type": "string"
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "sessionTtlMs": {
+      "type": "number",
+      "minimum": 0
+    },
+    "signingKeyPath": {
+      "type": "string"
+    },
+    "cacheDir": {
+      "type": "string"
+    }
+  }
+}

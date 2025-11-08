@@ -1,0 +1,37 @@
+{
+  "name": "1mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/server",
+    "packages/shared"
+  ],
+  "scripts": {
+    "build": "make build",
+    "dev": "make dev",
+    "serve": "node scripts/dev-serve.js serve --no-ui",
+    "init": "node scripts/dev-serve.js init",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "lint": "biome lint .",
+    "lint:fix": "biome lint --write .",
+    "check": "biome check .",
+    "check:fix": "biome check --write .",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test",
+    "prepare": "husky",
+    "1mcp": "node packages/server/dist/cli/index.js"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.2",
+    "@types/node": "^22.0.0",
+    "dotenv": "17.2.3",
+    "husky": "^9.1.7",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

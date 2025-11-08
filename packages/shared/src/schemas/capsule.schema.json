@@ -1,0 +1,152 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Capsule",
+  "type": "object",
+  "required": ["version", "language", "runtime", "entry", "fsLayers", "policy", "sig"],
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "1"
+    },
+    "language": {
+      "type": "string",
+      "enum": ["js", "py"]
+    },
+    "runtime": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^(quickjs|pyodide)@[0-9]"
+        }
+      }
+    },
+    "entry": {
+      "type": "object",
+      "required": ["path", "argv", "env", "cwd"],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "argv": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "cwd": {
+          "type": "string"
+        }
+      }
+    },
+    "fsLayers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "sha256", "path"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": ["code", "deps"]
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "path": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "policy": {
+      "$ref": "#/$defs/policy"
+    },
+    "sig": {
+      "type": "string"
+    }
+  },
+  "$defs": {
+    "policy": {
+      "type": "object",
+      "required": ["network", "filesystem", "limits"],
+      "properties": {
+        "network": {
+          "type": "object",
+          "required": ["allowedDomains", "deniedDomains", "denyIpLiterals", "blockPrivateRanges", "maxBodyBytes", "maxRedirects"],
+          "properties": {
+            "allowedDomains": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "deniedDomains": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "denyIpLiterals": {
+              "type": "boolean"
+            },
+            "blockPrivateRanges": {
+              "type": "boolean"
+            },
+            "maxBodyBytes": {
+              "type": "number",
+              "minimum": 0
+            },
+            "maxRedirects": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        },
+        "filesystem": {
+          "type": "object",
+          "required": ["readonly", "writable"],
+          "properties": {
+            "readonly": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "writable": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "required": ["timeoutMs", "memMb", "stdoutBytes"],
+          "properties": {
+            "timeoutMs": {
+              "type": "number",
+              "minimum": 0
+            },
+            "memMb": {
+              "type": "number",
+              "minimum": 0
+            },
+            "stdoutBytes": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    }
+  }
+}
