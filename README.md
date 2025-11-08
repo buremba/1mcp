@@ -8,7 +8,7 @@
 
 **Example:**
 
-Instead of LLM making two separate tool calls, it can know execute code:
+Instead of LLM making two separate tool calls, it can execute code, 1mcp dispatches calls, takes care of retries automatically. 
 
 ```javascript
 const me = await github.getMe();
@@ -17,6 +17,12 @@ const repos = await github.listRepos({ username: me.login });
 
 ## Available Tools
 
+### Code Execution
+
+Code is compiled to WASM using esbuild, then executed in a sandboxed QuickJS runtime (per session). You can opt-in to run code in the browser client or fall back to backend execution, both with policy-enforced safety.
+
+- `run_js` – execute JavaScript/TypeScript that chains MCP calls
+
 ### Filesystem
 
 Each MCP client session has a virtual filesystem (OPFS in the browser, or a sandboxed filesystem in the backend).
@@ -24,12 +30,6 @@ Each MCP client session has a virtual filesystem (OPFS in the browser, or a sand
 - `read` – fetch file contents inside the sandbox
 - `write` – create or patch files with policy checks
 - `search` – scan files without loading entire directories
-
-### Code Execution
-
-Code is compiled to WASM using esbuild, then executed in a sandboxed QuickJS runtime (per session). You can opt-in to run code in the browser client or fall back to backend execution, both with policy-enforced safety.
-
-- `run_js` – execute JavaScript/TypeScript that chains MCP calls
 
 **Example:**
 
@@ -67,22 +67,20 @@ The server will start and expose MCP tools that can be used by your AI agent.
 The `@1mcp/ai-sdk` package turns AI SDK tools into a sandboxed MCP surface:
 
 ```typescript
-import { mcpToolToAiSdk } from '@1mcp/ai-sdk';
+import { convertTo1MCP } from '@1mcp/ai-sdk';
 import { generateText } from 'ai';
 import { openai } from '@ai-sdk/openai';
 
-const weatherTool = {
-  name: "getWeather",
-  async execute({ city, country }: { city: string; country: string }) {
-    return { city, weather: "Sunny", temperatureC: 23 };
-  },
-};
-
 const tools = {
-  getWeather: weatherTool,
+  weatherTool : {
+    name: "getWeather",
+    async execute({ city, country }: { city: string; country: string }) {
+      return { city, weather: "Sunny", temperatureC: 23 };
+    },
+  }
 };
 
-const combinedTools = mcpToolToAiSdk(tools, {
+const combinedTools = convertTo1MCP(tools, {
   language: "js",
   npm: { dependencies: { "axios": "^1.6.0" }},
   policy: {

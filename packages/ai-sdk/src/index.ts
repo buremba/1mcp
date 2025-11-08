@@ -155,6 +155,12 @@ async function startEmbeddedMode(
 	};
 }
 
+// Alias for README compatibility
+export const convertTo1MCP = convertTo1McpTools;
+
+// Re-export browser client
+export { RelayBrowserClient } from "./browser/client.js";
+
 // Re-export types
 export type { CoreTool } from "ai";
 export type { RelayConfig } from "@1mcp/shared";
