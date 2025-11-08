@@ -1,9 +1,10 @@
 {
   "name": "1mcp",
   "version": "0.1.0",
-  "description": "MCP server with sandboxed JavaScript/Python execution using QuickJS and Pyodide",
+  "description": "MCP server with sandboxed JavaScript execution using QuickJS and V8 Isolates",
   "type": "module",
   "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "bin": {
     "1mcp": "./dist/cli/index.js"
   },
@@ -11,9 +12,8 @@
     "mcp",
     "model-context-protocol",
     "javascript",
-    "python",
     "quickjs",
-    "pyodide",
+    "v8-isolates",
     "sandbox",
     "code-execution"
   ],
@@ -51,10 +51,11 @@
     "esbuild": "^0.24.0",
     "fflate": "^0.8.2",
     "quickjs-emscripten": "^0.30.0",
-    "pyodide": "^0.27.0",
+    "isolated-vm": "^5.0.1",
     "tldts": "^6.1.0",
     "ipaddr.js": "^2.2.0",
-    "@1mcp/shared": "workspace:*"
+    "@1mcp/shared": "workspace:*",
+    "@1mcp/ai-sdk": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

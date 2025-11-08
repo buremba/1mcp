@@ -53,11 +53,11 @@ npx relay-mcp serve     # serves the UI and exposes the MCP endpoint
 
 
 User experience on serve:
-1. Server starts at http://127.0.0.1:7800
+1. Server starts at http://127.0.0.1:7888
 2. Browser auto-opens to /
 3. Browser shows blank/minimal page, logs to console: "relay-mcp: Connected to server (session: abc123)"
 4. Browser console logs: "relay-mcp: Ready. Waiting for execution requests..."
-5. External MCP client (e.g., Claude) connects to POST http://127.0.0.1:7800/mcp
+5. External MCP client (e.g., Claude) connects to POST http://127.0.0.1:7888/mcp
 6. Claude calls run_js → server builds capsule → sends to browser
 7. Browser console logs: "relay-mcp: Executing capsule 5f3a2... (language: js)"
 8. Browser executes in WASM, streams results back
@@ -710,7 +710,7 @@ CLI (npx relay-mcp):
 
 init → create relay.config.json (validated with ajv)
 
-serve [-c file] [--port 7800] [--bind <addr>] [--no-open] [--no-ui] → start UI + MCP HTTP stream endpoint
+serve [-c file] [--port 7888] [--bind <addr>] [--no-open] [--no-ui] → start UI + MCP HTTP stream endpoint
 
   Startup sequence:
     1. First-run initialization (if needed):
@@ -720,11 +720,11 @@ serve [-c file] [--port 7800] [--bind <addr>] [--no-open] [--no-ui] → start UI
 
     2. Start HTTP server:
        - Bind to address (see below)
-       - Log: "relay-mcp server started at http://127.0.0.1:7800"
-       - Log: "MCP endpoint: POST http://127.0.0.1:7800/mcp"
+       - Log: "relay-mcp server started at http://127.0.0.1:7888"
+       - Log: "MCP endpoint: POST http://127.0.0.1:7888/mcp"
 
     3. Auto-open browser (unless --no-open):
-       - Open http://127.0.0.1:7800/ in default browser
+       - Open http://127.0.0.1:7888/ in default browser
        - Browser auto-connects: calls POST /session, opens SSE connection
        - Log: "Browser session attached: <sessionId>"
 
@@ -747,7 +747,7 @@ serve [-c file] [--port 7800] [--bind <addr>] [--no-open] [--no-ui] → start UI
         "mode": "headless",
         "executionMode": "node-harness-only",
         "endpoints": {
-          "mcp": "POST http://127.0.0.1:7800/mcp"
+          "mcp": "POST http://127.0.0.1:7888/mcp"
         }
       }
 

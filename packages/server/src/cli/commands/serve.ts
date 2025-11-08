@@ -17,6 +17,9 @@ interface ServeOptions {
   bind: string;
   open: boolean;
   ui: boolean;
+  timeout?: string;
+  maxMemory?: string;
+  maxStdout?: string;
 }
 
 export async function serveCommand(options: ServeOptions) {
@@ -31,6 +34,32 @@ export async function serveCommand(options: ServeOptions) {
 
   const configText = await readFile(configPath, "utf-8");
   const config: RelayConfig = JSON.parse(configText);
+
+  // Apply environment variables and CLI options (priority: CLI > ENV > config)
+  config.policy = config.policy || { network: { allowedDomains: [], deniedDomains: [], denyIpLiterals: true, blockPrivateRanges: true, maxBodyBytes: 5242880, maxRedirects: 5 }, filesystem: { readonly: ['/'], writable: ['/tmp'] }, limits: { timeoutMs: 60000, memMb: 256, stdoutBytes: 1048576 } };
+  config.policy.limits = config.policy.limits || { timeoutMs: 60000, memMb: 256, stdoutBytes: 1048576 };
+
+  // Environment variables
+  if (process.env.TIMEOUT_MS) {
+    config.policy.limits.timeoutMs = parseInt(process.env.TIMEOUT_MS, 10);
+  }
+  if (process.env.MAX_MEMORY_MB) {
+    config.policy.limits.memMb = parseInt(process.env.MAX_MEMORY_MB, 10);
+  }
+  if (process.env.MAX_STDOUT_BYTES) {
+    config.policy.limits.stdoutBytes = parseInt(process.env.MAX_STDOUT_BYTES, 10);
+  }
+
+  // CLI options (highest priority)
+  if (options.timeout) {
+    config.policy.limits.timeoutMs = parseInt(options.timeout, 10);
+  }
+  if (options.maxMemory) {
+    config.policy.limits.memMb = parseInt(options.maxMemory, 10);
+  }
+  if (options.maxStdout) {
+    config.policy.limits.stdoutBytes = parseInt(options.maxStdout, 10);
+  }
 
   // First-run initialization (spec §12)
   const keyPath = resolve(

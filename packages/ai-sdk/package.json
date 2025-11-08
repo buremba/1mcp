@@ -1,0 +1,59 @@
+{
+  "name": "@1mcp/ai-sdk",
+  "version": "0.1.0",
+  "description": "Convert AI SDK tools to 1mcp gateway tools - reduce context bloat",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js"
+    },
+    "./chrome": {
+      "types": "./dist/chrome-provider.d.ts",
+      "import": "./dist/chrome-provider.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "ai-sdk",
+    "vercel",
+    "mcp",
+    "1mcp",
+    "tool-converter",
+    "context-reduction"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ai": "^4.0.0",
+    "zod": "^3.23.8",
+    "1mcp": "workspace:*",
+    "@1mcp/shared": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.0.0",
+    "typescript": "^5.6.3"
+  }
+}

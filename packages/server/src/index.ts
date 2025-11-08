@@ -10,6 +10,8 @@ import pino from "pino";
 import { SessionManager } from "./services/session-manager.js";
 import { CapsuleBuilder } from "./capsule/builder.js";
 import { MCPManager } from "./services/mcp-manager.js";
+import { CapsuleCleanupService } from "./services/capsule-cleanup.js";
+// import { AiSdkToolLoader } from "./services/ai-sdk-tool-loader.js";
 import { NodeExecutor } from "./harness/executor.js";
 import { setupMcpEndpoint } from "./endpoints/mcp.js";
 import { setupSessionEndpoints } from "./endpoints/session.js";
@@ -54,19 +56,100 @@ export async function startServer(serverConfig: ServerConfig) {
   });
   await capsuleBuilder.initialize();
 
-  // Initialize Node harness executor
-  const nodeExecutor = new NodeExecutor(serverConfig.cacheDir);
-  await nodeExecutor.initialize();
-  log.info("Node harness initialized (QuickJS + Pyodide)");
-
   // Initialize MCP manager for upstream MCP servers
   const mcpManager = new MCPManager(serverConfig.config.mcps, log);
 
+  // Initialize Node harness executor (QuickJS WASM) with MCP support
+  const nodeExecutor = new NodeExecutor(
+    serverConfig.cacheDir,
+    serverConfig.config.policy.filesystem,
+    mcpManager,
+    serverConfig.config.mcps
+  );
+  await nodeExecutor.initialize();
+  log.info("Node harness initialized (QuickJS WASM)");
+
+  // Initialize capsule cleanup service
+  const cleanupService = new CapsuleCleanupService({
+    cacheDir: serverConfig.cacheDir,
+    maxSizeBytes: 1024 * 1024 * 1024, // 1GB
+    maxAgeDays: 7, // 7 days
+    intervalMs: 60 * 60 * 1000, // 1 hour
+  }, log);
+  cleanupService.start();
+  log.info("Capsule cleanup service started");
+
+  // Initialize AI SDK tool loader if configured
+  // let aiSdkToolLoader: AiSdkToolLoader | undefined;
+  // if (serverConfig.config.aiSdkTools && serverConfig.config.aiSdkTools.length > 0) {
+  //   log.info("Initializing AI SDK tool loader...");
+  //   aiSdkToolLoader = new AiSdkToolLoader(process.cwd());
+  //   await aiSdkToolLoader.loadTools(serverConfig.config.aiSdkTools);
+  //   log.info(`AI SDK tools loaded: ${aiSdkToolLoader.getToolCount()} tool(s)`);
+  // }
+
   // Setup endpoints
-  setupMcpEndpoint(app, capsuleBuilder, sessionManager, nodeExecutor);
+  setupMcpEndpoint(app, capsuleBuilder, sessionManager, nodeExecutor, serverConfig.config, undefined);
   setupSessionEndpoints(app, sessionManager);
   setupCapsuleEndpoints(app, capsuleBuilder);
   setupMcpsRpcEndpoint(app, mcpManager);
+
+  // Simple execute endpoint for frontend tools (non-MCP)
+  app.post("/execute", async (c) => {
+    try {
+      const body = await c.req.json();
+      const { sessionId, runtime, code } = body;
+
+      if (!sessionId || !runtime || !code) {
+        return c.json({ error: "Missing required parameters: sessionId, runtime, code" }, 400);
+      }
+
+      if (runtime !== "quickjs") {
+        return c.json({ error: "Only 'quickjs' runtime is currently supported" }, 400);
+      }
+
+      // Import QuickJSRuntime dynamically
+      const { QuickJSRuntime } = await import("./harness/quickjs-runtime.js");
+      const qjs = new QuickJSRuntime();
+
+      // Create minimal capsule for execution
+      const minimalCapsule = {
+        version: "1.0.0",
+        language: "js",
+        entry: { path: "/index.js" },
+        policy: serverConfig.config.policy || {
+          limits: {
+            timeoutMs: 30000,
+            memMb: 128,
+            stdoutBytes: 1048576
+          }
+        }
+      };
+
+      let stdout = "";
+      let stderr = "";
+
+      // Execute code using QuickJS
+      const result = await qjs.execute(
+        code,
+        minimalCapsule as any,
+        (chunk: string) => { stdout += chunk; },
+        (chunk: string) => { stderr += chunk; }
+      );
+
+      return c.json({
+        ...result,
+        stdout,
+        stderr
+      });
+    } catch (error: unknown) {
+      log.error({ error }, "Execute endpoint error");
+      return c.json({
+        error: error instanceof Error ? error.message : String(error),
+        success: false
+      }, 500);
+    }
+  });
 
   // Static file serving for UI
   if (!serverConfig.headless) {
@@ -74,11 +157,11 @@ export async function startServer(serverConfig: ServerConfig) {
     const { resolve, dirname } = await import("node:path");
     const { fileURLToPath } = await import("node:url");
 
-    // Serve website dist (built by Vite)
-    // When built: packages/server/dist/server/src/index.js
-    // Need to go up 5 levels to project root, then to website/dist
+    // Serve AI SDK integration example (built by Vite)
+    // When built: packages/server/dist/index.js
+    // Need to go up 3 levels to project root, then to examples/ai-sdk-integration/dist
     const __dirname = dirname(fileURLToPath(import.meta.url));
-    const websiteDist = resolve(__dirname, "../../../../../website/dist");
+    const websiteDist = resolve(__dirname, "../../../examples/ai-sdk-integration/dist");
 
     app.use("/*", serveStatic({ root: websiteDist }));
   }
@@ -115,6 +198,9 @@ export async function startServer(serverConfig: ServerConfig) {
   // Graceful shutdown (spec v1.3)
   process.on("SIGTERM", async () => {
     log.info("SIGTERM received, shutting down gracefully...");
+
+    // Stop cleanup service
+    cleanupService.stop();
 
     // Shutdown MCP manager first
     await mcpManager.shutdown();

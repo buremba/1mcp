@@ -25,7 +25,7 @@ export class SessionManager {
     setInterval(() => this.cleanup(), 60_000); // every minute
   }
 
-  async createSession(): Promise<{ sessionId: string; attachToken: string }> {
+  async createSession(type: "browser" | "mcp" = "browser"): Promise<{ sessionId: string; attachToken: string }> {
     if (!this.privateKey) {
       throw new Error("SessionManager not initialized");
     }
@@ -42,6 +42,7 @@ export class SessionManager {
 
     const session: Session = {
       id: sessionId,
+      type,
       attachToken,
       createdAt: now,
       lastSeen: now,
@@ -134,6 +135,8 @@ export class SessionManager {
     for (const [id, session] of this.sessions.entries()) {
       if (now - session.lastSeen > ttl) {
         this.sessions.delete(id);
+        this.eventEmitters.delete(id);
+        this.resultQueues.delete(id);
       }
     }
   }

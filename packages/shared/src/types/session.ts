@@ -4,10 +4,11 @@
 
 export interface Session {
   id: string;
+  type: "browser" | "mcp"; // Type of session
   attachToken: string; // JWT with 5min expiry, Ed25519 signed
   createdAt: number;
   lastSeen: number;
-  browserAttached: boolean;
+  browserAttached: boolean; // Only used for browser sessions
 }
 
 export interface SessionCreateResponse {

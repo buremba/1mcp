@@ -4,7 +4,7 @@
 
 export interface Capsule {
   version: "1";
-  language: "js" | "py";
+  language: "js";
   runtime: RuntimeInfo;
   entry: EntryPoint;
   fsLayers: FSLayer[];
@@ -13,7 +13,7 @@ export interface Capsule {
 }
 
 export interface RuntimeInfo {
-  id: string; // e.g., "quickjs@2025-10" or "pyodide@0.27"
+  id: string; // e.g., "quickjs@2025-10"
 }
 
 export interface EntryPoint {

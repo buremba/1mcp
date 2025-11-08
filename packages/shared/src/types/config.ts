@@ -5,11 +5,11 @@
 import type { Policy } from "./capsule.js";
 
 export interface RelayConfig {
-  language: "js" | "py";
+  language: "js";
   npm?: NpmConfig;
-  pip?: PipConfig;
   policy: Policy;
   mcps: MCPServerConfig[];
+  aiSdkTools?: AiSdkToolConfig[]; // Optional AI SDK tools to load
   sessionTtlMs?: number; // default 300000 (5 min)
   signingKeyPath?: string; // default ".relay/keys/"
   cacheDir?: string; // default ".relay/capsules/"
@@ -20,17 +20,21 @@ export interface NpmConfig {
   lockfile?: string;
 }
 
-export interface PipConfig {
-  requirements: string[]; // e.g., ["requests==2.32.0"]
-  wheelUrls?: string[]; // URLs to .whl files
-}
-
 export interface MCPServerConfig {
   name: string;
   transport: "http" | "stdio";
   endpoint?: string; // for HTTP transport
   command?: string; // for stdio transport
   args?: string[]; // for stdio transport
+}
+
+export interface AiSdkToolConfig {
+  /** Path to the tool file (relative to project root or absolute) */
+  path: string;
+  /** Name to expose the tool as in MCP (defaults to export name or filename) */
+  name?: string;
+  /** Export name to use (defaults to 'default' or the only named export) */
+  export?: string;
 }
 
 /**

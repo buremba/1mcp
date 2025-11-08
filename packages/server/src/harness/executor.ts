@@ -1,5 +1,6 @@
 /**
- * Node harness executor - runs capsules server-side
+ * Node harness executor - runs capsules server-side using V8 Isolates
+ * Uses isolated-vm for fast, secure JavaScript execution with full ES6+ support
  */
 
 import { readFile } from "node:fs/promises";
@@ -7,24 +8,29 @@ import { join } from "node:path";
 import { unzipSync } from "fflate";
 import type { Capsule } from "@1mcp/shared";
 import { QuickJSRuntime } from "./quickjs-runtime.js";
-import { PyodideRuntime } from "./pyodide-runtime.js";
+import { NodeVirtualFilesystem } from "../vfs/node-vfs.js";
+import { FilesystemPolicyEnforcer } from "../policy/filesystem.js";
+import type { FilesystemPolicy, MCPServerConfig } from "@1mcp/shared";
+import type { MCPManager } from "../services/mcp-manager.js";
 
 export interface ExecutionResult {
   exitCode: number;
   stdout: string;
   stderr: string;
   wallMs: number;
+  lastValue?: string; // Last expression result (REPL-style)
 }
 
 export class NodeExecutor {
-  private pyodideRuntime: PyodideRuntime | null = null;
-
-  constructor(private cacheDir: string) {}
+  constructor(
+    private cacheDir: string,
+    private defaultFilesystemPolicy?: FilesystemPolicy,
+    private mcpManager?: MCPManager,
+    private mcpConfigs?: MCPServerConfig[]
+  ) {}
 
   async initialize() {
-    // Pre-initialize Pyodide (it's slow to load)
-    this.pyodideRuntime = new PyodideRuntime();
-    await this.pyodideRuntime.initialize();
+    // No initialization needed for V8 Isolates (instant startup)
   }
 
   async executeCapsule(capsuleHash: string): Promise<ExecutionResult> {
@@ -51,49 +57,59 @@ export class NodeExecutor {
 
     const code = new TextDecoder().decode(entryCode);
 
-    // Capture stdout/stderr
+    // Capture stdout/stderr with size limits
+    const maxStdoutBytes = capsule.policy?.limits?.stdoutBytes || 1048576; // 1MB default
     let stdout = "";
     let stderr = "";
     const onStdout = (chunk: string) => {
       stdout += chunk;
+      // Enforce stdout size limit
+      if (Buffer.byteLength(stdout, 'utf8') > maxStdoutBytes) {
+        throw new Error(`Stdout size limit exceeded (${maxStdoutBytes} bytes)`);
+      }
     };
     const onStderr = (chunk: string) => {
       stderr += chunk;
+      // Allow stderr to grow slightly more for error messages
+      if (Buffer.byteLength(stderr, 'utf8') > maxStdoutBytes * 2) {
+        throw new Error(`Stderr size limit exceeded`);
+      }
     };
 
-    // Execute with appropriate runtime
-    let exitCode: number;
-    if (capsule.language === "js") {
-      const runtime = new QuickJSRuntime();
-      exitCode = await runtime.execute(code, capsule, onStdout, onStderr);
-    } else if (capsule.language === "py") {
-      if (!this.pyodideRuntime) {
-        throw new Error("Pyodide runtime not initialized");
-      }
-      exitCode = await this.pyodideRuntime.execute(
-        code,
-        capsule,
-        onStdout,
-        onStderr,
-        codeFiles
-      );
-    } else {
-      throw new Error(`Unsupported language: ${capsule.language}`);
+    // Execute with QuickJS runtime (temporarily until isolated-vm Node v25 compatibility is resolved)
+    if (capsule.language !== "js") {
+      throw new Error(`Unsupported language: ${capsule.language}. Only JavaScript is supported.`);
     }
+
+    // Create VFS for this execution
+    // Use a temporary directory for this capsule's filesystem
+    const capsuleWorkDir = join(capsuleDir, 'workspace');
+    const filesystemPolicy = capsule.policy?.filesystem || this.defaultFilesystemPolicy || {
+      readonly: ['/'],
+      writable: ['/tmp', '/out']
+    };
+
+    const policyEnforcer = new FilesystemPolicyEnforcer(filesystemPolicy);
+    const vfs = new NodeVirtualFilesystem({
+      baseDir: capsuleWorkDir,
+      policy: policyEnforcer
+    });
+
+    const runtime = new QuickJSRuntime(vfs, this.mcpManager, this.mcpConfigs);
+    const result = await runtime.execute(code, capsule, onStdout, onStderr);
 
     const wallMs = Date.now() - startTime;
 
     return {
-      exitCode,
+      exitCode: result.exitCode,
       stdout,
       stderr,
       wallMs,
+      lastValue: result.lastValue,
     };
   }
 
   dispose() {
-    if (this.pyodideRuntime) {
-      this.pyodideRuntime.dispose();
-    }
+    // No cleanup needed
   }
 }

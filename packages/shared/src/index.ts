@@ -5,6 +5,9 @@
 // Export all types
 export * from "./types/index.js";
 
+// Export VFS interface
+export * from "./vfs/index.js";
+
 // Export constants
 export * from "./constants.js";
 

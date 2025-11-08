@@ -19,10 +19,6 @@ export const RUNTIME_CDNS = {
     PRIMARY: "https://cdn.jsdelivr.net/npm/quickjs-emscripten@0.30.0/dist/",
     FALLBACK: "https://unpkg.com/quickjs-emscripten@0.30.0/dist/",
   },
-  PYODIDE: {
-    PRIMARY: "https://cdn.jsdelivr.net/pyodide/v0.27.0/full/",
-    FALLBACK: "https://unpkg.com/pyodide@0.27.0/",
-  },
 } as const;
 
 /**
