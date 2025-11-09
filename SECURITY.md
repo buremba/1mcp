@@ -35,17 +35,24 @@
 
 ### 🚨 REMAINING CRITICAL ISSUES
 
-#### 1. **Network Policy Not Enforced**
-- **Severity:** HIGH
-- **Status:** Policy classes exist but network access not restricted
-- **Impact:** Code can access ANY network resource within WASM sandbox
-- **Risk:** Data exfiltration, SSRF attacks
+#### 1. **Network Policy Enforcement** ✅ IMPLEMENTED
+- **Severity:** ~~HIGH~~ → **RESOLVED**
+- **Status:** Network policy fully enforced in both backend and browser
+- **Implementation:**
+  - Backend: Guarded fetch injected into QuickJS runtime
+  - Browser: Policy-enforced fetch in web worker
+  - Pre-flight checks: Domain allow/deny lists, IP literals, private ranges
+  - Post-flight checks: Response size limits, redirect validation
+- **Remaining:** None - network policy fully functional
 
-#### 2. **Filesystem Policy Not Enforced**
-- **Severity:** MEDIUM
-- **Status:** Policy classes exist but filesystem access not restricted
-- **Impact:** Within Pyodide virtual filesystem, no path restrictions
-- **Risk:** Access to unintended files within WASM sandbox
+#### 2. **Filesystem Policy Enforcement** ✅ IMPLEMENTED
+- **Severity:** ~~MEDIUM~~ → **RESOLVED**
+- **Status:** Filesystem policy enforced in backend, OPFS implementation ready for browser
+- **Implementation:**
+  - Backend: NodeVirtualFilesystem enforces readonly/writable paths on every operation
+  - Browser: OPFSVirtualFilesystem with policy enforcement (ready for QuickJS WASM integration)
+  - Path traversal protection in both implementations
+- **Remaining:** Integrate QuickJS WASM into browser worker (currently uses eval placeholder)
 
 #### 3. **Upstream MCP Server Trust**
 - **Severity:** MEDIUM

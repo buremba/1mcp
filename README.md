@@ -80,7 +80,7 @@ const tools = {
   }
 };
 
-const combinedTools = convertTo1MCP(tools, {
+const { client, cleanup } = await convertTo1MCP(tools, {
   language: "js",
   npm: { dependencies: { "axios": "^1.6.0" }},
   policy: {
@@ -96,11 +96,16 @@ const combinedTools = convertTo1MCP(tools, {
   }]
 });
 
+const mcpTools = await client.tools();
+
 const result = await generateText({
   model: openai('gpt-4'),
   prompt: 'Get the weather for Paris, France',
-  tools: combinedTools
+  tools: mcpTools
 });
+
+// Clean up when done
+await cleanup();
 ```
 
 **Learn more:** See [examples/ai-sdk-integration](examples/ai-sdk-integration) for the full example.
