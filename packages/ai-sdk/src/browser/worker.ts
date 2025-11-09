@@ -7,6 +7,7 @@
 
 import type { Capsule } from "@1mcp/shared";
 import { OPFSVirtualFilesystem } from "./opfs-vfs.js";
+import { RUNTIME_CDNS } from "@1mcp/shared";
 
 interface WorkerMessage {
 	type: "execute";
@@ -91,6 +92,40 @@ async function executeCapsule(message: WorkerMessage["capsule"]): Promise<void> 
 // Global VFS instance (persists across executions for session)
 let vfs: OPFSVirtualFilesystem | null = null;
 
+// Global QuickJS instance (loaded once)
+let QuickJS: any = null;
+
+/**
+ * Load QuickJS WASM from CDN
+ */
+async function loadQuickJS(): Promise<any> {
+	if (QuickJS) return QuickJS;
+
+	try {
+		// Try primary CDN first
+		const module = await import(
+			/* webpackIgnore: true */
+			`${RUNTIME_CDNS.QUICKJS.PRIMARY}index.mjs`
+		);
+		QuickJS = await module.getQuickJS();
+		return QuickJS;
+	} catch (error) {
+		console.warn("Primary CDN failed, trying fallback:", error);
+
+		// Try fallback CDN
+		try {
+			const module = await import(
+				/* webpackIgnore: true */
+				`${RUNTIME_CDNS.QUICKJS.FALLBACK}index.mjs`
+			);
+			QuickJS = await module.getQuickJS();
+			return QuickJS;
+		} catch (fallbackError) {
+			throw new Error(`Failed to load QuickJS from both CDNs: ${fallbackError}`);
+		}
+	}
+}
+
 /**
  * Execute JavaScript capsule using QuickJS WASM
  */
@@ -133,81 +168,104 @@ async function executeJavaScript(
 			setupGuardedFetch(manifest.policy.network);
 		}
 
-		// TODO: Load QuickJS WASM and execute
-		// For now, use eval as a placeholder (NOT SECURE - only for development)
+		// Load QuickJS WASM
 		postMessage({
 			type: "result",
 			data: {
 				runId,
 				type: "stdout",
-				chunk: "[Worker] Executing code...\n",
+				chunk: "[Worker] Loading QuickJS WASM...\n",
 			},
 		} satisfies ResultMessage);
 
-		// Inject VFS globals if available
-		if (vfs) {
-			(globalThis as any).read = async (path: string) => {
-				return await vfs!.readFile(path, "utf-8");
-			};
-			(globalThis as any).write = async (path: string, data: string) => {
-				await vfs!.writeFile(path, data);
-			};
-			(globalThis as any).readdir = async (path: string) => {
-				return await vfs!.readdir(path);
-			};
-			(globalThis as any).mkdir = async (path: string) => {
-				await vfs!.mkdir(path, { recursive: true });
-			};
-			(globalThis as any).exists = async (path: string) => {
-				return await vfs!.exists(path);
-			};
-		}
+		const quickjs = await loadQuickJS();
+		const vm = quickjs.newContext();
 
-		// Redirect console.log to postMessage
-		const originalLog = console.log;
-		const originalError = console.error;
-
-		console.log = (...args: unknown[]) => {
+		try {
 			postMessage({
 				type: "result",
 				data: {
 					runId,
 					type: "stdout",
-					chunk: args.join(" ") + "\n",
+					chunk: "[Worker] Executing code in QuickJS...\n",
 				},
 			} satisfies ResultMessage);
-		};
 
-		console.error = (...args: unknown[]) => {
-			postMessage({
-				type: "result",
-				data: {
-					runId,
-					type: "stderr",
-					chunk: args.join(" ") + "\n",
-				},
-			} satisfies ResultMessage);
-		};
-
-		try {
-			// Execute code (PLACEHOLDER - should use QuickJS WASM)
-			// biome-ignore lint/security/noGlobalEval: Temporary placeholder for QuickJS
-			const result = eval(code);
-
-			if (result !== undefined) {
+			// Setup console.log to capture output
+			const logHandle = vm.newFunction("log", (...args: any[]) => {
+				const nativeArgs = args.map((arg: any) => vm.dump(arg));
 				postMessage({
 					type: "result",
 					data: {
 						runId,
 						type: "stdout",
-						chunk: `Result: ${String(result)}\n`,
+						chunk: nativeArgs.join(" ") + "\n",
 					},
 				} satisfies ResultMessage);
+			});
+
+			const errorHandle = vm.newFunction("error", (...args: any[]) => {
+				const nativeArgs = args.map((arg: any) => vm.dump(arg));
+				postMessage({
+					type: "result",
+					data: {
+						runId,
+						type: "stderr",
+						chunk: nativeArgs.join(" ") + "\n",
+					},
+				} satisfies ResultMessage);
+			});
+
+			const consoleHandle = vm.newObject();
+			vm.setProp(consoleHandle, "log", logHandle);
+			vm.setProp(consoleHandle, "error", errorHandle);
+			vm.setProp(consoleHandle, "warn", logHandle);
+			vm.setProp(consoleHandle, "info", logHandle);
+			vm.setProp(vm.global, "console", consoleHandle);
+
+			// Clean up handles
+			logHandle.dispose();
+			errorHandle.dispose();
+			consoleHandle.dispose();
+
+			// Inject VFS functions if available
+			if (vfs) {
+				await injectVFSIntoQuickJS(vm, vfs, runId);
+			}
+
+			// Execute the code
+			const result = vm.evalCode(code);
+
+			if (result.error) {
+				const error = vm.dump(result.error);
+				result.error.dispose();
+
+				postMessage({
+					type: "result",
+					data: {
+						runId,
+						type: "stderr",
+						chunk: `Error: ${error}\n`,
+					},
+				} satisfies ResultMessage);
+			} else {
+				// Capture last expression result
+				const value = vm.dump(result.value);
+				result.value.dispose();
+
+				if (value !== undefined) {
+					postMessage({
+						type: "result",
+						data: {
+							runId,
+							type: "stdout",
+							chunk: `Result: ${String(value)}\n`,
+						},
+					} satisfies ResultMessage);
+				}
 			}
 		} finally {
-			// Restore console
-			console.log = originalLog;
-			console.error = originalError;
+			vm.dispose();
 		}
 	} catch (error) {
 		postMessage({
@@ -219,6 +277,151 @@ async function executeJavaScript(
 			},
 		} satisfies ResultMessage);
 		throw error;
+	}
+}
+
+/**
+ * Inject VFS functions into QuickJS VM
+ */
+async function injectVFSIntoQuickJS(
+	vm: any,
+	vfs: OPFSVirtualFilesystem,
+	runId: string
+): Promise<void> {
+	// Create VFS wrapper code that uses async functions
+	const vfsCode = `
+		globalThis.read = async function(path, options = {}) {
+			return await __vfs_read(path);
+		};
+
+		globalThis.write = async function(path, content) {
+			return await __vfs_write(path, content);
+		};
+
+		globalThis.readdir = async function(path) {
+			const result = await __vfs_readdir(path);
+			return JSON.parse(result);
+		};
+
+		globalThis.mkdir = async function(path) {
+			return await __vfs_mkdir(path);
+		};
+
+		globalThis.exists = async function(path) {
+			return await __vfs_exists(path);
+		};
+	`;
+
+	// Inject low-level VFS functions
+	const readHandle = vm.newFunction("__vfs_read", (pathHandle: any) => {
+		const path = vm.dump(pathHandle);
+		const promise = vfs.readFile(path, "utf-8");
+
+		return vm.newPromise((resolve: any, reject: any) => {
+			promise.then(
+				(result) => {
+					resolve(vm.newString(result as string));
+				},
+				(error) => {
+					reject(vm.newString(String(error)));
+				}
+			);
+		});
+	});
+
+	const writeHandle = vm.newFunction("__vfs_write", (pathHandle: any, dataHandle: any) => {
+		const path = vm.dump(pathHandle);
+		const data = vm.dump(dataHandle);
+		const promise = vfs.writeFile(path, data);
+
+		return vm.newPromise((resolve: any, reject: any) => {
+			promise.then(
+				() => {
+					resolve(vm.undefined);
+				},
+				(error) => {
+					reject(vm.newString(String(error)));
+				}
+			);
+		});
+	});
+
+	const readdirHandle = vm.newFunction("__vfs_readdir", (pathHandle: any) => {
+		const path = vm.dump(pathHandle);
+		const promise = vfs.readdir(path);
+
+		return vm.newPromise((resolve: any, reject: any) => {
+			promise.then(
+				(result) => {
+					resolve(vm.newString(JSON.stringify(result)));
+				},
+				(error) => {
+					reject(vm.newString(String(error)));
+				}
+			);
+		});
+	});
+
+	const mkdirHandle = vm.newFunction("__vfs_mkdir", (pathHandle: any) => {
+		const path = vm.dump(pathHandle);
+		const promise = vfs.mkdir(path, { recursive: true });
+
+		return vm.newPromise((resolve: any, reject: any) => {
+			promise.then(
+				() => {
+					resolve(vm.undefined);
+				},
+				(error) => {
+					reject(vm.newString(String(error)));
+				}
+			);
+		});
+	});
+
+	const existsHandle = vm.newFunction("__vfs_exists", (pathHandle: any) => {
+		const path = vm.dump(pathHandle);
+		const promise = vfs.exists(path);
+
+		return vm.newPromise((resolve: any, reject: any) => {
+			promise.then(
+				(result) => {
+					resolve(vm.newNumber(result ? 1 : 0));
+				},
+				(error) => {
+					reject(vm.newString(String(error)));
+				}
+			);
+		});
+	});
+
+	vm.setProp(vm.global, "__vfs_read", readHandle);
+	vm.setProp(vm.global, "__vfs_write", writeHandle);
+	vm.setProp(vm.global, "__vfs_readdir", readdirHandle);
+	vm.setProp(vm.global, "__vfs_mkdir", mkdirHandle);
+	vm.setProp(vm.global, "__vfs_exists", existsHandle);
+
+	readHandle.dispose();
+	writeHandle.dispose();
+	readdirHandle.dispose();
+	mkdirHandle.dispose();
+	existsHandle.dispose();
+
+	// Execute VFS wrapper code
+	const wrapperResult = vm.evalCode(vfsCode);
+	if (wrapperResult.error) {
+		const error = vm.dump(wrapperResult.error);
+		wrapperResult.error.dispose();
+
+		postMessage({
+			type: "result",
+			data: {
+				runId,
+				type: "stderr",
+				chunk: `Warning: Failed to inject VFS: ${error}\n`,
+			},
+		} satisfies ResultMessage);
+	} else {
+		wrapperResult.value.dispose();
 	}
 }
 
