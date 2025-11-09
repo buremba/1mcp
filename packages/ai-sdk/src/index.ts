@@ -164,6 +164,3 @@ export { RelayBrowserClient } from "./browser/client.js";
 // Re-export types
 export type { CoreTool } from "ai";
 export type { RelayConfig } from "@1mcp/shared";
-
-// Export Chrome Prompt API provider
-export { chrome, ChromeLanguageModelProvider, checkChromeAvailability } from "./chrome-provider.js";

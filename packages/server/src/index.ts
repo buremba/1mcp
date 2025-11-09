@@ -11,6 +11,7 @@ import { SessionManager } from "./services/session-manager.js";
 import { CapsuleBuilder } from "./capsule/builder.js";
 import { MCPManager } from "./services/mcp-manager.js";
 import { CapsuleCleanupService } from "./services/capsule-cleanup.js";
+import { StubGenerator } from "./services/stub-generator.js";
 import { NodeExecutor } from "./harness/executor.js";
 import { setupMcpEndpoint } from "./endpoints/mcp.js";
 import { setupSessionEndpoints } from "./endpoints/session.js";
@@ -57,6 +58,12 @@ export async function startServer(serverConfig: ServerConfig) {
 
   // Initialize MCP manager for upstream MCP servers
   const mcpManager = new MCPManager(serverConfig.config.mcps, log);
+
+  // Generate TypeScript stubs for MCP tools
+  if (serverConfig.config.mcps && serverConfig.config.mcps.length > 0) {
+    const stubGenerator = new StubGenerator(mcpManager, ".relay/mcp", log);
+    await stubGenerator.generateAllStubs(serverConfig.config.mcps.map(m => m.name));
+  }
 
   // Initialize Node harness executor (QuickJS WASM) with MCP support
   const nodeExecutor = new NodeExecutor(

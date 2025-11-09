@@ -5,6 +5,7 @@
 import { getQuickJS } from "quickjs-emscripten";
 import type { Capsule, VirtualFilesystem, MCPServerConfig } from "@1mcp/shared";
 import type { MCPManager } from "../services/mcp-manager.js";
+import { NetworkPolicyEnforcer } from "../policy/network.js";
 
 export class QuickJSRuntime {
   constructor(
@@ -78,6 +79,11 @@ export class QuickJSRuntime {
       // Inject MCP proxy functions if available
       if (this.mcpManager && this.mcpConfigs) {
         this.injectMCPProxies(vm);
+      }
+
+      // Inject guarded fetch with network policy enforcement
+      if (capsule.policy?.network) {
+        this.injectGuardedFetch(vm, capsule.policy.network, onStderr);
       }
 
       // Execute the code
@@ -359,5 +365,155 @@ export class QuickJSRuntime {
 
     // Clean up
     mcpCallHandle.dispose();
+  }
+
+  /**
+   * Inject guarded fetch with network policy enforcement
+   */
+  private injectGuardedFetch(vm: any, networkPolicy: any, onStderr: (chunk: string) => void) {
+    const enforcer = new NetworkPolicyEnforcer(networkPolicy);
+
+    // Create the native fetch wrapper
+    const fetchHandle = vm.newFunction("__native_fetch", (urlHandle: any, optionsHandle: any) => {
+      const url = vm.dump(urlHandle);
+      const options = optionsHandle ? JSON.parse(vm.dump(optionsHandle) || '{}') : {};
+
+      // Pre-flight policy check
+      const check = enforcer.canFetch(url);
+      if (!check.allowed) {
+        return vm.newPromise((_resolve: any, reject: any) => {
+          reject(vm.newString(`Network policy violation: ${check.reason}`));
+        });
+      }
+
+      // Execute fetch with policy enforcement
+      const fetchPromise = this.guardedFetch(url, options, networkPolicy, onStderr);
+
+      return vm.newPromise((resolve: any, reject: any) => {
+        fetchPromise.then(
+          (response) => {
+            // Convert response to QuickJS object
+            const responseObj = vm.newObject();
+            vm.setProp(responseObj, "ok", vm.newNumber(response.ok ? 1 : 0));
+            vm.setProp(responseObj, "status", vm.newNumber(response.status));
+            vm.setProp(responseObj, "statusText", vm.newString(response.statusText));
+
+            // Add text() method
+            const textHandle = vm.newFunction("text", () => {
+              return vm.newPromise((resolveText: any, rejectText: any) => {
+                response.text().then(
+                  (text) => resolveText(vm.newString(text)),
+                  (err) => rejectText(vm.newString(String(err)))
+                );
+              });
+            });
+            vm.setProp(responseObj, "text", textHandle);
+            textHandle.dispose();
+
+            // Add json() method
+            const jsonHandle = vm.newFunction("json", () => {
+              return vm.newPromise((resolveJson: any, rejectJson: any) => {
+                response.json().then(
+                  (data) => resolveJson(vm.newString(JSON.stringify(data))),
+                  (err) => rejectJson(vm.newString(String(err)))
+                );
+              });
+            });
+            vm.setProp(responseObj, "json", jsonHandle);
+            jsonHandle.dispose();
+
+            resolve(responseObj);
+          },
+          (error) => {
+            reject(vm.newString(String(error)));
+          }
+        );
+      });
+    });
+
+    vm.setProp(vm.global, "__native_fetch", fetchHandle);
+    fetchHandle.dispose();
+
+    // Inject JavaScript wrapper for fetch
+    const fetchWrapperCode = `
+      globalThis.fetch = async function(url, options = {}) {
+        const response = await __native_fetch(url, JSON.stringify(options));
+
+        // Wrap response methods to parse JSON strings
+        const originalJson = response.json;
+        response.json = async function() {
+          const jsonStr = await originalJson.call(this);
+          return JSON.parse(jsonStr);
+        };
+
+        return response;
+      };
+    `;
+
+    const wrapperResult = vm.evalCode(fetchWrapperCode);
+    if (wrapperResult.error) {
+      const error = vm.dump(wrapperResult.error);
+      wrapperResult.error.dispose();
+      onStderr(`Warning: Failed to inject fetch wrapper: ${error}\n`);
+    } else {
+      wrapperResult.value.dispose();
+    }
+  }
+
+  /**
+   * Execute guarded fetch with network policy enforcement
+   */
+  private async guardedFetch(
+    url: string,
+    options: RequestInit,
+    networkPolicy: any,
+    _onStderr: (chunk: string) => void
+  ): Promise<Response> {
+    const maxBodyBytes = networkPolicy.maxBodyBytes || 5 * 1024 * 1024; // 5MB default
+    const maxRedirects = networkPolicy.maxRedirects || 5;
+
+    // Execute fetch with manual redirect handling
+    let redirectCount = 0;
+    let currentUrl = url;
+
+    while (redirectCount <= maxRedirects) {
+      const response = await fetch(currentUrl, {
+        ...options,
+        redirect: 'manual',
+      });
+
+      // Handle redirects
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get('location');
+        if (!location) {
+          throw new Error('Redirect without Location header');
+        }
+
+        redirectCount++;
+        if (redirectCount > maxRedirects) {
+          throw new Error(`Too many redirects (max: ${maxRedirects})`);
+        }
+
+        // Validate redirect URL against policy
+        const enforcer = new NetworkPolicyEnforcer(networkPolicy);
+        const check = enforcer.canFetch(location);
+        if (!check.allowed) {
+          throw new Error(`Redirect blocked by policy: ${check.reason}`);
+        }
+
+        currentUrl = new URL(location, currentUrl).toString();
+        continue;
+      }
+
+      // Check response size
+      const contentLength = response.headers.get('content-length');
+      if (contentLength && parseInt(contentLength) > maxBodyBytes) {
+        throw new Error(`Response too large: ${contentLength} bytes (max: ${maxBodyBytes})`);
+      }
+
+      return response;
+    }
+
+    throw new Error(`Maximum redirects exceeded: ${maxRedirects}`);
   }
 }
