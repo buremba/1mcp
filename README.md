@@ -13,20 +13,13 @@ const repos = await github.listRepos({ username: me.login });
 
 ## Quick Start
 
-1. Install globally:
-   ```bash
-   npm install -g 1mcp
-   ```
+Install globally, initialize configuration and start the server:
 
-2. Initialize configuration:
-   ```bash
-   1mcp init
-   ```
-
-3. Start the server:
-   ```bash
-   1mcp serve
-   ```
+```bash
+npm install -g 1mcp
+1mcp init
+1mcp serve
+```
 
 The server will start and expose MCP tools that can be used by your AI agent.
 
