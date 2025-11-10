@@ -1,46 +1,14 @@
 # 1mcp - avoid context bloating
 
-1mcp lets agents compose MCP tool calls and run code safely, cutting token usage by up to 96%.
+1mcp lets agents compose MCP tool calls and run code safely via WASM, cutting token usage by up to 96%.
 
 ## How It Works
 
-1mcp maps every MCP tool to sandboxed TypeScript stubs `mcp__mcpName_toolName.ts.d`, exposing only 4 core tools to the LLM. Instead of making individual MCP tool calls, agents write JavaScript code that chains MCP calls together, reducing token usage significantly.
-
-**Example:**
-
-Instead of LLM making two separate tool calls, it can execute code, 1mcp dispatches calls, takes care of retries automatically. 
+1mcp maps every MCP tool to sandboxed TypeScript stubs `mcp__mcpName_toolName.ts.d`, exposing only 4 core tools to the LLM. Instead of making individual MCP tool calls, agents write JavaScript code that chains MCP calls together, reducing token usage significantly. Instead of LLM making two separate tool calls, it can execute code, 1mcp dispatches calls, takes care of retries automatically. 
 
 ```javascript
 const me = await github.getMe();
 const repos = await github.listRepos({ username: me.login });
-```
-
-## Available Tools
-
-### Code Execution
-
-Code is compiled to WASM using esbuild, then executed in a sandboxed QuickJS runtime (per session). You can opt-in to run code in the browser client or fall back to backend execution, both with policy-enforced safety.
-
-- `run_js` – execute JavaScript/TypeScript that chains MCP calls
-
-### Filesystem
-
-Each MCP client session has a virtual filesystem (OPFS in the browser, or a sandboxed filesystem in the backend).
-
-- `read` – fetch file contents inside the sandbox
-- `write` – create or patch files with policy checks
-- `search` – scan files without loading entire directories
-
-**Example:**
-
-```javascript
-// Execution 1
-const x = 42;
-await write('/test.txt', 'hello');
-
-// Execution 2 in same session
-x; // ReferenceError - variables don't persist between executions
-await read('/test.txt'); // file persists - filesystem state is maintained
 ```
 
 ## Quick Start
@@ -109,6 +77,35 @@ await cleanup();
 ```
 
 **Learn more:** See [examples/ai-sdk-integration](examples/ai-sdk-integration) for the full example.
+
+
+## Available Tools
+
+### Code Execution
+
+Code is compiled to WASM using esbuild, then executed in a sandboxed QuickJS runtime (per session). You can opt-in to run code in the browser client or fall back to backend execution, both with policy-enforced safety.
+
+- `run_js` – execute JavaScript/TypeScript that chains MCP calls
+
+### Filesystem
+
+Each MCP client session has a virtual filesystem (OPFS in the browser, or a sandboxed filesystem in the backend).
+
+- `read` – fetch file contents inside the sandbox
+- `write` – create or patch files with policy checks
+- `search` – scan files without loading entire directories
+
+**Example:**
+
+```javascript
+// Execution 1
+const x = 42;
+await write('/test.txt', 'hello');
+
+// Execution 2 in same session
+x; // ReferenceError - variables don't persist between executions
+await read('/test.txt'); // file persists - filesystem state is maintained
+```
 
 ### Browser Integration
 

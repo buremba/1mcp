@@ -1,6 +1,6 @@
 import { useCallback, useState, useRef, useEffect } from "react";
 import { generateText } from "ai";
-import { chrome, type ChromeProviderCallbacks, type ChromeLanguageModelProvider } from "@1mcp/ai-sdk/chrome";
+import { chrome, type ChromeProviderCallbacks, type ChromeLanguageModelProvider } from "../providers/chrome-provider";
 
 export interface Message {
 	id: string;

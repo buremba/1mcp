@@ -53,6 +53,7 @@ export async function startServer(serverConfig: ServerConfig) {
     cacheDir: serverConfig.cacheDir,
     keyPath: serverConfig.keyPath,
     policy: serverConfig.config.policy,
+    logger: log,
   });
   await capsuleBuilder.initialize();
 

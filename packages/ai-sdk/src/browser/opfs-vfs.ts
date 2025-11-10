@@ -5,7 +5,7 @@
  * Provides sandboxed filesystem access with policy enforcement.
  */
 
-import type { VirtualFilesystem, FilesystemPolicy } from "@1mcp/shared";
+import type { FilesystemPolicy } from "@1mcp/shared";
 
 /**
  * Browser-compatible filesystem policy enforcer
@@ -52,7 +52,7 @@ class BrowserFilesystemPolicyEnforcer {
 	}
 }
 
-export class OPFSVirtualFilesystem implements VirtualFilesystem {
+export class OPFSVirtualFilesystem {
 	private root: FileSystemDirectoryHandle | null = null;
 	private policy: BrowserFilesystemPolicyEnforcer;
 
@@ -139,7 +139,7 @@ export class OPFSVirtualFilesystem implements VirtualFilesystem {
 	/**
 	 * Create directory
 	 */
-	async mkdir(path: string, options?: { recursive?: boolean }): Promise<void> {
+	async mkdir(path: string, _options?: { recursive?: boolean }): Promise<void> {
 		// Policy check
 		if (!this.policy.canWrite(path)) {
 			throw new Error(`Write access denied: ${path}`);

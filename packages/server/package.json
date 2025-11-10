@@ -21,7 +21,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/1mcp"
+    "url": "https://github.com/buremba/1mcp"
   },
   "files": [
     "dist",
@@ -39,6 +39,7 @@
     "@1mcp/ai-sdk": "workspace:*",
     "@1mcp/shared": "workspace:*",
     "@hono/node-server": "^1.13.0",
+    "archiver": "^7.0.1",
     "commander": "^12.0.0",
     "esbuild": "^0.24.0",
     "fflate": "^0.8.2",
@@ -56,6 +57,7 @@
     "undici": "^7.0.0"
   },
   "devDependencies": {
+    "@types/archiver": "^6.0.2",
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.8.3"

@@ -14,8 +14,11 @@ import type {
   Capsule,
   Policy,
   RunJsParams,
+  FSLayer,
 } from "@1mcp/shared";
 import { intersectPolicies } from "../policy/intersection.js";
+import { MountLayerBuilder } from "./mount-builder.js";
+import type { Logger } from "pino";
 
 const zipAsync = promisify(zip);
 
@@ -23,14 +26,18 @@ export interface BuildOptions {
   cacheDir: string;
   keyPath: string;
   policy: Policy;
+  logger?: Logger;
 }
 
 export class CapsuleBuilder {
   private privateKey: KeyLike | null = null;
   private buildCache = new Map<string, string>(); // cacheKey → bundled code
   private readonly MAX_CACHE_SIZE = 1000; // LRU eviction after 1000 entries
+  private mountBuilder: MountLayerBuilder;
 
-  constructor(private options: BuildOptions) {}
+  constructor(private options: BuildOptions) {
+    this.mountBuilder = new MountLayerBuilder(options.logger);
+  }
 
   async initialize() {
     const keyPem = await readFile(this.options.keyPath, "utf-8");
@@ -127,6 +134,27 @@ ${bundledCode}
     // For v1, we bundle everything with esbuild into a single IIFE.
     // Future versions will support separate deps layers for better caching.
 
+    // Process mount layers if configured
+    const intersectedPolicy = intersectPolicies(this.options.policy, params.policy);
+    const mountLayers: FSLayer[] = [];
+    const mountZips = new Map<string, Uint8Array>();
+
+    if (intersectedPolicy.filesystem.mounts && intersectedPolicy.filesystem.mounts.length > 0) {
+      // Build mount layers
+      const mountResults = await this.mountBuilder.buildMountLayers(
+        intersectedPolicy.filesystem.mounts,
+        this.options.cacheDir
+      );
+
+      // Extract layers and store zips
+      for (const result of mountResults) {
+        mountLayers.push(result.layer);
+        // Read the zip file that was created
+        const zipData = await readFile(result.zipPath);
+        mountZips.set(result.layer.id, zipData);
+      }
+    }
+
     // Build capsule manifest (unsigned)
     const capsule: Omit<Capsule, "sig"> = {
       version: "1",
@@ -144,8 +172,9 @@ ${bundledCode}
           sha256: codeHash,
           path: "fs.code.zip",
         },
+        ...mountLayers, // Include mount layers
       ],
-      policy: intersectPolicies(this.options.policy, params.policy),
+      policy: intersectedPolicy,
     };
 
     // Compute hash BEFORE signing (enables deduplication)
@@ -159,7 +188,7 @@ ${bundledCode}
     // Cache miss: sign and save
     const sig = await this.signCapsule(capsule);
     const signedCapsule: Capsule = { ...capsule, sig };
-    await this.saveCapsule(capsuleHash, signedCapsule, codeZip);
+    await this.saveCapsule(capsuleHash, signedCapsule, codeZip, mountZips);
 
     return capsuleHash;
   }
@@ -214,7 +243,8 @@ ${bundledCode}
   private async saveCapsule(
     hash: string,
     capsule: Capsule,
-    codeZip: Uint8Array
+    codeZip: Uint8Array,
+    mountZips?: Map<string, Uint8Array>
   ): Promise<void> {
     const dir = resolve(this.options.cacheDir, hash);
     await mkdir(dir, { recursive: true });
@@ -224,6 +254,13 @@ ${bundledCode}
       JSON.stringify(capsule, null, 2)
     );
     await writeFile(join(dir, "fs.code.zip"), codeZip);
+
+    // Save mount zips if provided
+    if (mountZips) {
+      for (const [layerId, zipData] of mountZips) {
+        await writeFile(join(dir, `fs.${layerId}.zip`), zipData);
+      }
+    }
   }
 
   /**

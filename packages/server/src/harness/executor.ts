@@ -3,9 +3,12 @@
  * Uses isolated-vm for fast, secure JavaScript execution with full ES6+ support
  */
 
-import { readFile } from "node:fs/promises";
+import { readFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { unzipSync } from "fflate";
+import { createWriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
+import { Readable } from "node:stream";
 import type { Capsule } from "@1mcp/shared";
 import { QuickJSRuntime } from "./quickjs-runtime.js";
 import { NodeVirtualFilesystem } from "../vfs/node-vfs.js";
@@ -44,9 +47,38 @@ export class NodeExecutor {
     );
     const capsule: Capsule = JSON.parse(capsuleJson);
 
+    // Create workspace directory
+    const capsuleWorkDir = join(capsuleDir, 'workspace');
+    await mkdir(capsuleWorkDir, { recursive: true });
+
     // Load code layer
     const codeZip = await readFile(join(capsuleDir, "fs.code.zip"));
     const codeFiles = unzipSync(codeZip);
+
+    // Extract mount layers to their target directories
+    for (const layer of capsule.fsLayers) {
+      if (layer.target && layer.id !== "code") {
+        // This is a mount layer
+        const mountZipPath = join(capsuleDir, layer.path);
+        const mountZip = await readFile(mountZipPath);
+        const mountFiles = unzipSync(mountZip);
+
+        // Extract files to target directory
+        const targetDir = join(capsuleWorkDir, layer.target);
+        await mkdir(targetDir, { recursive: true });
+
+        for (const [filePath, fileData] of Object.entries(mountFiles)) {
+          const fullPath = join(targetDir, filePath);
+          const fileDir = join(fullPath, '..');
+          await mkdir(fileDir, { recursive: true });
+
+          // Write file using streams for better memory efficiency
+          const readable = Readable.from(Buffer.from(fileData));
+          const writable = createWriteStream(fullPath);
+          await pipeline(readable, writable);
+        }
+      }
+    }
 
     // Get entry file
     const entryPath = capsule.entry.path.replace(/^\//, ""); // Remove leading slash
@@ -82,8 +114,6 @@ export class NodeExecutor {
     }
 
     // Create VFS for this execution
-    // Use a temporary directory for this capsule's filesystem
-    const capsuleWorkDir = join(capsuleDir, 'workspace');
     const filesystemPolicy = capsule.policy?.filesystem || this.defaultFilesystemPolicy || {
       readonly: ['/'],
       writable: ['/tmp', '/out']

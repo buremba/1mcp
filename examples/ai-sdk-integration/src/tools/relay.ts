@@ -1,3 +1,14 @@
+/**
+ * DEPRECATED: This file is no longer used.
+ *
+ * The app now uses convertTo1MCP from @1mcp/ai-sdk to properly connect
+ * to the relay server via MCP protocol, which automatically provides
+ * all 4 tools: run_js, read, write, search.
+ *
+ * This manual implementation only provided the run_js tool and used
+ * a custom /execute endpoint instead of the proper MCP protocol.
+ */
+
 import { tool } from "ai";
 import { z } from "zod";
 
@@ -104,7 +115,7 @@ export const executeJavaScriptTool = tool({
 	}),
 	execute: async ({ code }) => {
 		console.log("🔧 [TOOL EXECUTE] Called with code:", code);
-		
+
 		// Check if relay is initialized, if not wait a bit and retry
 		if (!relayServerUrl || !sessionId) {
 			console.warn("🔧 [TOOL EXECUTE] Relay not initialized, waiting...");
@@ -117,28 +128,45 @@ export const executeJavaScriptTool = tool({
 				}
 			}
 		}
-		
+
 		try {
 			console.log("🔧 [TOOL EXECUTE] Calling executeViaRelay...");
-			const result = await executeViaRelay(code, "quickjs");
-			console.log("🔧 [TOOL EXECUTE] Got result from executeViaRelay:", result);
+			const result = await executeViaRelay(code, "quickjs") as any;
+			console.log("🔧 [TOOL EXECUTE] Got result from executeViaRelay:", JSON.stringify(result, null, 2));
 
-			const returnValue = {
-				success: true,
-				result,
-				runtime: "quickjs",
-			};
-			console.log("🔧 [TOOL EXECUTE] Returning:", returnValue);
-			return returnValue;
+			// For Chrome's Prompt API, return a very simple, direct result
+			// Chrome's model will interpret and present this to the user
+			if (result.exitCode === 0) {
+				// Return the last value if present, otherwise stdout, otherwise success message
+				if (result.lastValue !== undefined && result.lastValue !== null) {
+					const simpleResult = String(result.lastValue);
+					console.log("🔧 [TOOL EXECUTE] lastValue type:", typeof result.lastValue);
+					console.log("🔧 [TOOL EXECUTE] lastValue value:", result.lastValue);
+					console.log("🔧 [TOOL EXECUTE] Converted to string:", simpleResult);
+					console.log("🔧 [TOOL EXECUTE] String typeof:", typeof simpleResult);
+					console.log("🔧 [TOOL EXECUTE] FINAL RETURN VALUE:", simpleResult);
+					return simpleResult;
+				}
+
+				if (result.stdout && result.stdout.trim()) {
+					console.log("🔧 [TOOL EXECUTE] Returning stdout:", result.stdout.trim());
+					return result.stdout.trim();
+				}
+
+				const successMsg = 'Code executed successfully';
+				console.log("🔧 [TOOL EXECUTE] Returning success message");
+				return successMsg;
+			} else {
+				// Error case
+				const errorMsg = result.stderr || `Execution failed with exit code ${result.exitCode}`;
+				console.log("🔧 [TOOL EXECUTE] Returning error:", errorMsg);
+				return errorMsg;
+			}
 		} catch (error) {
 			console.error("🔧 [TOOL EXECUTE] Error occurred:", error);
-			const errorValue = {
-				success: false,
-				error: error instanceof Error ? error.message : String(error),
-				runtime: "quickjs",
-			};
-			console.log("🔧 [TOOL EXECUTE] Returning error:", errorValue);
-			return errorValue;
+			const errorMessage = `Execution error: ${error instanceof Error ? error.message : String(error)}`;
+			console.log("🔧 [TOOL EXECUTE] Returning error:", errorMessage);
+			return errorMessage;
 		}
 	},
 });

@@ -4,6 +4,7 @@
 
 import { getQuickJS } from "quickjs-emscripten";
 import type { Capsule, VirtualFilesystem, MCPServerConfig } from "@1mcp/shared";
+import { setupConsole, wrapCodeForReturn, dumpResult, injectVFSFunctions } from "@1mcp/shared";
 import type { MCPManager } from "../services/mcp-manager.js";
 import { NetworkPolicyEnforcer } from "../policy/network.js";
 
@@ -48,32 +49,12 @@ export class QuickJSRuntime {
     });
 
     try {
-      // Set up console.log to capture output
-      const logHandle = vm.newFunction("log", (...args) => {
-        const nativeArgs = args.map((arg) => vm.dump(arg));
-        onStdout(nativeArgs.join(" ") + "\n");
-      });
-      const errorHandle = vm.newFunction("error", (...args) => {
-        const nativeArgs = args.map((arg) => vm.dump(arg));
-        onStderr(nativeArgs.join(" ") + "\n");
-      });
+      // Set up console using shared utility
+      setupConsole(vm as any, { onStdout, onStderr });
 
-      const consoleHandle = vm.newObject();
-      vm.setProp(consoleHandle, "log", logHandle);
-      vm.setProp(consoleHandle, "error", errorHandle);
-      vm.setProp(consoleHandle, "warn", logHandle);
-      vm.setProp(consoleHandle, "info", logHandle);
-
-      vm.setProp(vm.global, "console", consoleHandle);
-
-      // Clean up handles
-      logHandle.dispose();
-      errorHandle.dispose();
-      consoleHandle.dispose();
-
-      // Inject VFS functions if available
+      // Inject VFS functions if available (using shared utility)
       if (this.vfs) {
-        this.injectVFSFunctions(vm);
+        injectVFSFunctions(vm as any, this.vfs, { onError: onStderr });
       }
 
       // Inject MCP proxy functions if available
@@ -86,8 +67,10 @@ export class QuickJSRuntime {
         this.injectGuardedFetch(vm, capsule.policy.network, onStderr);
       }
 
-      // Execute the code
-      const result = vm.evalCode(code);
+      // Wrap code to capture the last expression value (using shared utility)
+      const codeToEval = wrapCodeForReturn(code);
+
+      const result = vm.evalCode(codeToEval);
 
       if (result.error) {
         const error = vm.dump(result.error);
@@ -108,11 +91,10 @@ export class QuickJSRuntime {
         return { exitCode: 1 };
       }
 
-      // Capture last expression result (skip undefined)
-      const value = vm.dump(result.value);
+      // Capture last expression result (using shared utility to handle objects)
+      const lastValue = result.value ? dumpResult(vm as any, result.value) : undefined;
       result.value.dispose();
 
-      const lastValue = value !== undefined ? String(value) : undefined;
       return { exitCode: 0, lastValue };
     } catch (error) {
       if (interrupted) {
@@ -130,176 +112,6 @@ export class QuickJSRuntime {
       vm.runtime.setInterruptHandler(() => false); // Clear handler
       vm.dispose();
     }
-  }
-
-  /**
-   * Inject VFS functions into QuickJS global scope
-   *
-   * Creates async-returning functions that user code must await:
-   * const content = await read('/tmp/file.txt');
-   * await write('/tmp/output.txt', 'hello');
-   */
-  private injectVFSFunctions(vm: any) {
-    const vfs = this.vfs!;
-
-    // Create a promise-based wrapper for async VFS operations
-    // Note: QuickJS-emscripten doesn't support async native functions directly,
-    // so we use vm.evalCode to create Promise-returning functions
-
-    const vfsCode = `
-      // Filesystem read function
-      globalThis.read = async function(path, options = {}) {
-        return await __vfs_read(path, JSON.stringify(options));
-      };
-
-      // Filesystem write function
-      globalThis.write = async function(path, content, options = {}) {
-        return await __vfs_write(path, content, JSON.stringify(options));
-      };
-
-      // List directory
-      globalThis.readdir = async function(path) {
-        const result = await __vfs_readdir(path);
-        return JSON.parse(result);
-      };
-
-      // Create directory
-      globalThis.mkdir = async function(path, options = {}) {
-        return await __vfs_mkdir(path, JSON.stringify(options));
-      };
-
-      // Get file stats
-      globalThis.stat = async function(path) {
-        const result = await __vfs_stat(path);
-        return JSON.parse(result);
-      };
-
-      // Check if exists
-      globalThis.exists = async function(path) {
-        return await __vfs_exists(path);
-      };
-    `;
-
-    // Inject the low-level __vfs_* functions that return promises
-    const readHandle = vm.newFunction("__vfs_read", (pathHandle: any, optionsHandle: any) => {
-      const path = vm.dump(pathHandle);
-      const options = JSON.parse(vm.dump(optionsHandle) || '{}');
-
-      // Return a promise handle
-      const promise = vfs.readFile(path, options);
-      return vm.newPromise((resolve: any, reject: any) => {
-        promise.then(
-          (result) => {
-            if (result instanceof Uint8Array) {
-              // Convert to array for QuickJS
-              resolve(vm.newString(Buffer.from(result).toString('utf-8')));
-            } else {
-              resolve(vm.newString(result));
-            }
-          },
-          (error) => {
-            reject(vm.newString(String(error)));
-          }
-        );
-      });
-    });
-
-    const writeHandle = vm.newFunction("__vfs_write", (pathHandle: any, contentHandle: any, optionsHandle: any) => {
-      const path = vm.dump(pathHandle);
-      const content = vm.dump(contentHandle);
-      const options = JSON.parse(vm.dump(optionsHandle) || '{}');
-
-      const promise = vfs.writeFile(path, content, options);
-      return vm.newPromise((resolve: any, reject: any) => {
-        promise.then(
-          () => resolve(vm.undefined),
-          (error) => reject(vm.newString(String(error)))
-        );
-      });
-    });
-
-    const readdirHandle = vm.newFunction("__vfs_readdir", (pathHandle: any) => {
-      const path = vm.dump(pathHandle);
-
-      const promise = vfs.readdir(path);
-      return vm.newPromise((resolve: any, reject: any) => {
-        promise.then(
-          (entries) => resolve(vm.newString(JSON.stringify(entries))),
-          (error) => reject(vm.newString(String(error)))
-        );
-      });
-    });
-
-    const mkdirHandle = vm.newFunction("__vfs_mkdir", (pathHandle: any, optionsHandle: any) => {
-      const path = vm.dump(pathHandle);
-      const options = JSON.parse(vm.dump(optionsHandle) || '{}');
-
-      const promise = vfs.mkdir(path, options);
-      return vm.newPromise((resolve: any, reject: any) => {
-        promise.then(
-          () => resolve(vm.undefined),
-          (error) => reject(vm.newString(String(error)))
-        );
-      });
-    });
-
-    const statHandle = vm.newFunction("__vfs_stat", (pathHandle: any) => {
-      const path = vm.dump(pathHandle);
-
-      const promise = vfs.stat(path);
-      return vm.newPromise((resolve: any, reject: any) => {
-        promise.then(
-          (stats) => {
-            // Convert Date objects to ISO strings for serialization
-            const serializable = {
-              ...stats,
-              mtime: stats.mtime.toISOString(),
-              atime: stats.atime?.toISOString(),
-              ctime: stats.ctime?.toISOString(),
-            };
-            resolve(vm.newString(JSON.stringify(serializable)));
-          },
-          (error) => reject(vm.newString(String(error)))
-        );
-      });
-    });
-
-    const existsHandle = vm.newFunction("__vfs_exists", (pathHandle: any) => {
-      const path = vm.dump(pathHandle);
-
-      const promise = vfs.exists(path);
-      return vm.newPromise((resolve: any, reject: any) => {
-        promise.then(
-          (exists) => resolve(vm.newNumber(exists ? 1 : 0)),
-          (error) => reject(vm.newString(String(error)))
-        );
-      });
-    });
-
-    // Set the low-level functions
-    vm.setProp(vm.global, "__vfs_read", readHandle);
-    vm.setProp(vm.global, "__vfs_write", writeHandle);
-    vm.setProp(vm.global, "__vfs_readdir", readdirHandle);
-    vm.setProp(vm.global, "__vfs_mkdir", mkdirHandle);
-    vm.setProp(vm.global, "__vfs_stat", statHandle);
-    vm.setProp(vm.global, "__vfs_exists", existsHandle);
-
-    // Execute the wrapper code that creates the nice async API
-    const result = vm.evalCode(vfsCode);
-    if (result.error) {
-      const error = vm.dump(result.error);
-      result.error.dispose();
-      throw new Error(`Failed to inject VFS functions: ${error}`);
-    }
-    result.value.dispose();
-
-    // Clean up handles
-    readHandle.dispose();
-    writeHandle.dispose();
-    readdirHandle.dispose();
-    mkdirHandle.dispose();
-    statHandle.dispose();
-    existsHandle.dispose();
   }
 
   /**

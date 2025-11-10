@@ -1,12 +1,14 @@
 import { Button } from "./ui/button";
 import { ScrollArea } from "./ui/scroll-area";
 import { Card } from "./ui/card";
-import type { Thread } from "../hooks/use-thread-storage";
+import type { Thread } from "../storage";
 import { cn } from "../lib/utils";
+import { Spinner } from "./icons/spinner";
 
 interface ThreadSidebarProps {
 	threads: Thread[];
 	currentThreadId: string | null;
+	generatingThreadId?: string | null;
 	onSelectThread: (id: string) => void;
 	onCreateThread: () => void;
 	onDeleteThread: (id: string) => void;
@@ -15,6 +17,7 @@ interface ThreadSidebarProps {
 export function ThreadSidebar({
 	threads,
 	currentThreadId,
+	generatingThreadId,
 	onSelectThread,
 	onCreateThread,
 	onDeleteThread,
@@ -80,7 +83,10 @@ export function ThreadSidebar({
 								)}
 								onClick={() => onSelectThread(thread.id)}
 							>
-								<div className="flex-1 min-w-0">
+								<div className="flex-1 min-w-0 flex items-center gap-2">
+									{generatingThreadId === thread.id && (
+										<Spinner className="w-3 h-3 flex-shrink-0" />
+									)}
 									<div className="text-sm truncate">
 										{thread.title}
 									</div>

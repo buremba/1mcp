@@ -7,7 +7,8 @@
 
 import type { Capsule } from "@1mcp/shared";
 import { OPFSVirtualFilesystem } from "./opfs-vfs.js";
-import { RUNTIME_CDNS } from "@1mcp/shared";
+import { BrowserLayerExtractor } from "./layer-extractor.js";
+import { RUNTIME_CDNS, setupConsole, injectVFSFunctions, dumpResult } from "@1mcp/shared";
 
 interface WorkerMessage {
 	type: "execute";
@@ -150,6 +151,36 @@ async function executeJavaScript(
 			} satisfies ResultMessage);
 		}
 
+		// Extract fsLayers to OPFS if VFS is available
+		if (vfs && manifest.fsLayers && manifest.fsLayers.length > 0) {
+			postMessage({
+				type: "result",
+				data: {
+					runId,
+					type: "stdout",
+					chunk: `[Worker] Extracting ${manifest.fsLayers.length} filesystem layers...\n`,
+				},
+			} satisfies ResultMessage);
+
+			const extractor = new BrowserLayerExtractor(vfs);
+
+			// Get base URL from capsule URL (remove the filename)
+			const baseUrl = urls.capsule.substring(0, urls.capsule.lastIndexOf("/"));
+
+			const results = await extractor.extractLayers(manifest.fsLayers, baseUrl);
+
+			for (const result of results) {
+				postMessage({
+					type: "result",
+					data: {
+						runId,
+						type: "stdout",
+						chunk: `[OPFS] Extracted layer '${result.layerId}': ${result.filesExtracted} files, ${Math.round(result.bytesExtracted / 1024)} KB\n`,
+					},
+				} satisfies ResultMessage);
+			}
+		}
+
 		// Download capsule code
 		postMessage({
 			type: "result",
@@ -191,46 +222,45 @@ async function executeJavaScript(
 				},
 			} satisfies ResultMessage);
 
-			// Setup console.log to capture output
-			const logHandle = vm.newFunction("log", (...args: any[]) => {
-				const nativeArgs = args.map((arg: any) => vm.dump(arg));
-				postMessage({
-					type: "result",
-					data: {
-						runId,
-						type: "stdout",
-						chunk: nativeArgs.join(" ") + "\n",
-					},
-				} satisfies ResultMessage);
+			// Setup console using shared utility
+			setupConsole(vm as any, {
+				onStdout: (chunk: string) => {
+					postMessage({
+						type: "result",
+						data: {
+							runId,
+							type: "stdout",
+							chunk,
+						},
+					} satisfies ResultMessage);
+				},
+				onStderr: (chunk: string) => {
+					postMessage({
+						type: "result",
+						data: {
+							runId,
+							type: "stderr",
+							chunk,
+						},
+					} satisfies ResultMessage);
+				},
 			});
 
-			const errorHandle = vm.newFunction("error", (...args: any[]) => {
-				const nativeArgs = args.map((arg: any) => vm.dump(arg));
-				postMessage({
-					type: "result",
-					data: {
-						runId,
-						type: "stderr",
-						chunk: nativeArgs.join(" ") + "\n",
-					},
-				} satisfies ResultMessage);
-			});
-
-			const consoleHandle = vm.newObject();
-			vm.setProp(consoleHandle, "log", logHandle);
-			vm.setProp(consoleHandle, "error", errorHandle);
-			vm.setProp(consoleHandle, "warn", logHandle);
-			vm.setProp(consoleHandle, "info", logHandle);
-			vm.setProp(vm.global, "console", consoleHandle);
-
-			// Clean up handles
-			logHandle.dispose();
-			errorHandle.dispose();
-			consoleHandle.dispose();
-
-			// Inject VFS functions if available
+			// Inject VFS functions if available using shared utility
 			if (vfs) {
-				await injectVFSIntoQuickJS(vm, vfs, runId);
+				injectVFSFunctions(vm as any, vfs as any, {
+					includeStat: false, // Browser VFS doesn't support stat yet
+					onError: (error: string) => {
+						postMessage({
+							type: "result",
+							data: {
+								runId,
+								type: "stderr",
+								chunk: error + "\n",
+							},
+						} satisfies ResultMessage);
+					},
+				});
 			}
 
 			// Execute the code
@@ -249,8 +279,8 @@ async function executeJavaScript(
 					},
 				} satisfies ResultMessage);
 			} else {
-				// Capture last expression result
-				const value = vm.dump(result.value);
+				// Capture last expression result using shared utility
+				const value = result.value ? dumpResult(vm as any, result.value) : undefined;
 				result.value.dispose();
 
 				if (value !== undefined) {
@@ -259,7 +289,7 @@ async function executeJavaScript(
 						data: {
 							runId,
 							type: "stdout",
-							chunk: `Result: ${String(value)}\n`,
+							chunk: `Result: ${value}\n`,
 						},
 					} satisfies ResultMessage);
 				}
@@ -277,151 +307,6 @@ async function executeJavaScript(
 			},
 		} satisfies ResultMessage);
 		throw error;
-	}
-}
-
-/**
- * Inject VFS functions into QuickJS VM
- */
-async function injectVFSIntoQuickJS(
-	vm: any,
-	vfs: OPFSVirtualFilesystem,
-	runId: string
-): Promise<void> {
-	// Create VFS wrapper code that uses async functions
-	const vfsCode = `
-		globalThis.read = async function(path, options = {}) {
-			return await __vfs_read(path);
-		};
-
-		globalThis.write = async function(path, content) {
-			return await __vfs_write(path, content);
-		};
-
-		globalThis.readdir = async function(path) {
-			const result = await __vfs_readdir(path);
-			return JSON.parse(result);
-		};
-
-		globalThis.mkdir = async function(path) {
-			return await __vfs_mkdir(path);
-		};
-
-		globalThis.exists = async function(path) {
-			return await __vfs_exists(path);
-		};
-	`;
-
-	// Inject low-level VFS functions
-	const readHandle = vm.newFunction("__vfs_read", (pathHandle: any) => {
-		const path = vm.dump(pathHandle);
-		const promise = vfs.readFile(path, "utf-8");
-
-		return vm.newPromise((resolve: any, reject: any) => {
-			promise.then(
-				(result) => {
-					resolve(vm.newString(result as string));
-				},
-				(error) => {
-					reject(vm.newString(String(error)));
-				}
-			);
-		});
-	});
-
-	const writeHandle = vm.newFunction("__vfs_write", (pathHandle: any, dataHandle: any) => {
-		const path = vm.dump(pathHandle);
-		const data = vm.dump(dataHandle);
-		const promise = vfs.writeFile(path, data);
-
-		return vm.newPromise((resolve: any, reject: any) => {
-			promise.then(
-				() => {
-					resolve(vm.undefined);
-				},
-				(error) => {
-					reject(vm.newString(String(error)));
-				}
-			);
-		});
-	});
-
-	const readdirHandle = vm.newFunction("__vfs_readdir", (pathHandle: any) => {
-		const path = vm.dump(pathHandle);
-		const promise = vfs.readdir(path);
-
-		return vm.newPromise((resolve: any, reject: any) => {
-			promise.then(
-				(result) => {
-					resolve(vm.newString(JSON.stringify(result)));
-				},
-				(error) => {
-					reject(vm.newString(String(error)));
-				}
-			);
-		});
-	});
-
-	const mkdirHandle = vm.newFunction("__vfs_mkdir", (pathHandle: any) => {
-		const path = vm.dump(pathHandle);
-		const promise = vfs.mkdir(path, { recursive: true });
-
-		return vm.newPromise((resolve: any, reject: any) => {
-			promise.then(
-				() => {
-					resolve(vm.undefined);
-				},
-				(error) => {
-					reject(vm.newString(String(error)));
-				}
-			);
-		});
-	});
-
-	const existsHandle = vm.newFunction("__vfs_exists", (pathHandle: any) => {
-		const path = vm.dump(pathHandle);
-		const promise = vfs.exists(path);
-
-		return vm.newPromise((resolve: any, reject: any) => {
-			promise.then(
-				(result) => {
-					resolve(vm.newNumber(result ? 1 : 0));
-				},
-				(error) => {
-					reject(vm.newString(String(error)));
-				}
-			);
-		});
-	});
-
-	vm.setProp(vm.global, "__vfs_read", readHandle);
-	vm.setProp(vm.global, "__vfs_write", writeHandle);
-	vm.setProp(vm.global, "__vfs_readdir", readdirHandle);
-	vm.setProp(vm.global, "__vfs_mkdir", mkdirHandle);
-	vm.setProp(vm.global, "__vfs_exists", existsHandle);
-
-	readHandle.dispose();
-	writeHandle.dispose();
-	readdirHandle.dispose();
-	mkdirHandle.dispose();
-	existsHandle.dispose();
-
-	// Execute VFS wrapper code
-	const wrapperResult = vm.evalCode(vfsCode);
-	if (wrapperResult.error) {
-		const error = vm.dump(wrapperResult.error);
-		wrapperResult.error.dispose();
-
-		postMessage({
-			type: "result",
-			data: {
-				runId,
-				type: "stderr",
-				chunk: `Warning: Failed to inject VFS: ${error}\n`,
-			},
-		} satisfies ResultMessage);
-	} else {
-		wrapperResult.value.dispose();
 	}
 }
 

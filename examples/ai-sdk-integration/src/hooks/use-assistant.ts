@@ -21,6 +21,7 @@ export interface Message {
 interface UseAssistantOptions {
 	tools?: Record<string, unknown>;
 	providerConfig: AIProviderConfig;
+	onToolCallsChange?: (toolCalls: ToolCall[]) => void;
 }
 
 /**
@@ -99,7 +100,6 @@ export function useAssistant(options: UseAssistantOptions) {
 			system: "You are a helpful assistant. When you use tools to help answer questions, always provide a clear, natural language explanation of the results to the user. Never just call a tool without explaining what you found.",
 			messages: messagesForApi,
 			tools: options.tools as any,
-			maxSteps: 5, // Allow multi-step tool calling (stop after 5 steps)
 		});
 
 		// Process the stream asynchronously
@@ -147,7 +147,7 @@ export function useAssistant(options: UseAssistantOptions) {
 						if (step.toolResults) {
 							step.toolResults.forEach((tr, trIdx) => {
 								console.log(`  Tool Result ${trIdx}:`, tr);
-								console.log(`  Tool Result.result:`, tr.result);
+								console.log(`  Tool Result.result:`, (tr as any).result);
 							});
 						}
 					});
@@ -158,11 +158,26 @@ export function useAssistant(options: UseAssistantOptions) {
 					for (const step of finalSteps) {
 						if (step.toolCalls) {
 							for (const tc of step.toolCalls) {
+								const toolResult = step.toolResults?.find(r => r.toolCallId === tc.toolCallId);
+								console.log(`🔍 [TOOL RESULT DEBUG] Tool: ${tc.toolName}`);
+								console.log(`🔍 [TOOL RESULT DEBUG] Full toolResult:`, toolResult);
+								console.log(`🔍 [TOOL RESULT DEBUG] toolResult keys:`, toolResult ? Object.keys(toolResult) : 'N/A');
+								console.log(`🔍 [TOOL RESULT DEBUG] ALL toolResult properties:`, JSON.stringify(toolResult, null, 2));
+
+								// AI SDK v5 stores tool results in 'result' field, not 'providerExecuted'
+								// Try multiple possible locations for the result
+								const actualResult = (toolResult as any)?.result ||
+								                     (toolResult as any)?.content ||
+								                     (toolResult as any)?.output ||
+								                     toolResult;
+
+								console.log(`🔍 [TOOL RESULT DEBUG] Extracted result:`, actualResult);
+
 								toolCallsFromSteps.push({
 									id: tc.toolCallId,
 									name: tc.toolName,
 									args: (tc as any).input as Record<string, unknown>,
-									result: step.toolResults?.find(r => r.toolCallId === tc.toolCallId)?.result,
+									result: actualResult,
 									status: "complete",
 								});
 							}
@@ -183,7 +198,8 @@ export function useAssistant(options: UseAssistantOptions) {
 						const toolResultsText = lastStep.toolResults.map(tr => {
 							const toolCall = lastStep.toolCalls?.find(tc => tc.toolCallId === tr.toolCallId);
 							const toolName = toolCall?.toolName || 'tool';
-							const output = tr.result;
+							// AI SDK v5 stores tool results in 'output' field
+							const output = (tr as any).output || (tr as any).result || (tr as any).content;
 
 							// Format the output based on its structure
 							if (output && typeof output === 'object') {
@@ -212,6 +228,10 @@ export function useAssistant(options: UseAssistantOptions) {
 				if (!responseText || responseText.trim() === '') {
 					responseText = accumulatedText || "Tool executed successfully. Check the Tool Calls sidebar for results.";
 				}
+
+				console.log("🎯 [FINAL UPDATE] toolCallsFromSteps:", JSON.stringify(toolCallsFromSteps, null, 2));
+				console.log("🎯 [FINAL UPDATE] toolCallsFromSteps length:", toolCallsFromSteps.length);
+				console.log("🎯 [FINAL UPDATE] responseText:", responseText);
 
 				// Update final message with complete text and tool calls
 				setMessages((prevMsgs) =>

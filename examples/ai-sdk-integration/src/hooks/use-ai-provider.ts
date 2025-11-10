@@ -1,39 +1,80 @@
 import { useMemo } from "react";
-import { chrome, type ChromeProviderCallbacks } from "@1mcp/ai-sdk/chrome";
+import { chrome, type ChromeProviderCallbacks } from "../providers/chrome-provider";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
-
-export type AIProvider = "chrome" | "openai" | "anthropic";
+import { parseModelId, getModelById, getDefaultModel } from "../config/models";
+import type { AIProvider } from "../storage";
 
 export interface AIProviderConfig {
 	provider: AIProvider;
 	model: any;
 	name: string;
+	modelId: string;
 	isAvailable: boolean;
 	error?: string;
 }
 
 interface UseAIProviderOptions {
+	modelId?: string; // e.g., "openai-gpt-4o-mini", "chrome-gemini-nano"
 	chromeCallbacks?: ChromeProviderCallbacks;
 }
 
 /**
- * Hook that reads environment variables and returns the configured AI provider
+ * Hook that initializes an AI provider based on modelId
+ * Supports dynamic model switching
  */
 export function useAIProvider(options?: UseAIProviderOptions): AIProviderConfig {
 	return useMemo(() => {
-		const provider = (import.meta.env.VITE_AI_PROVIDER || "chrome") as AIProvider;
+		// Get modelId from options or use default
+		let selectedModelId = options?.modelId;
+
+		if (!selectedModelId) {
+			// Fallback to env or default model
+			const envProvider = import.meta.env.VITE_AI_PROVIDER as AIProvider | undefined;
+			if (envProvider) {
+				// Try to construct from env variables
+				if (envProvider === "openai") {
+					const modelName = import.meta.env.VITE_OPENAI_MODEL || "gpt-4o-mini";
+					selectedModelId = `openai-${modelName}`;
+				} else if (envProvider === "anthropic") {
+					const modelName = import.meta.env.VITE_ANTHROPIC_MODEL || "claude-3-5-sonnet-20241022";
+					selectedModelId = `anthropic-${modelName}`;
+				} else {
+					selectedModelId = "chrome-gemini-nano";
+				}
+			} else {
+				// Use default from model config
+				const defaultModel = getDefaultModel();
+				selectedModelId = defaultModel.id;
+			}
+		}
+
+		// Parse modelId to get provider and model name
+		const { provider, modelName } = parseModelId(selectedModelId);
+
+		// Check if model is enabled
+		const modelConfig = getModelById(selectedModelId);
+		if (modelConfig && !modelConfig.enabled) {
+			return {
+				provider,
+				model: null,
+				name: modelName,
+				modelId: selectedModelId,
+				isAvailable: false,
+				error: `${modelConfig.name} is not available. ${provider === "openai" ? "Set VITE_OPENAI_API_KEY" : provider === "anthropic" ? "Set VITE_ANTHROPIC_API_KEY" : ""}`,
+			};
+		}
 
 		switch (provider) {
 			case "openai": {
 				const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-				const modelName = import.meta.env.VITE_OPENAI_MODEL || "gpt-4o-mini";
 
 				if (!apiKey) {
 					return {
 						provider: "openai",
 						model: null,
 						name: modelName,
+						modelId: selectedModelId,
 						isAvailable: false,
 						error: "OpenAI API key not configured. Set VITE_OPENAI_API_KEY in .env.local",
 					};
@@ -44,19 +85,20 @@ export function useAIProvider(options?: UseAIProviderOptions): AIProviderConfig 
 					provider: "openai",
 					model: openai(modelName),
 					name: modelName,
+					modelId: selectedModelId,
 					isAvailable: true,
 				};
 			}
 
 			case "anthropic": {
 				const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
-				const modelName = import.meta.env.VITE_ANTHROPIC_MODEL || "claude-3-5-sonnet-20241022";
 
 				if (!apiKey) {
 					return {
 						provider: "anthropic",
 						model: null,
 						name: modelName,
+						modelId: selectedModelId,
 						isAvailable: false,
 						error: "Anthropic API key not configured. Set VITE_ANTHROPIC_API_KEY in .env.local",
 					};
@@ -67,6 +109,7 @@ export function useAIProvider(options?: UseAIProviderOptions): AIProviderConfig 
 					provider: "anthropic",
 					model: anthropic(modelName),
 					name: modelName,
+					modelId: selectedModelId,
 					isAvailable: true,
 				};
 			}
@@ -74,23 +117,25 @@ export function useAIProvider(options?: UseAIProviderOptions): AIProviderConfig 
 			case "chrome":
 			default: {
 				try {
-					const chromeModel = chrome("gemini-nano", options?.chromeCallbacks);
+					const chromeModel = chrome(modelName, options?.chromeCallbacks);
 					return {
 						provider: "chrome",
 						model: chromeModel,
-						name: "gemini-nano",
+						name: modelName,
+						modelId: selectedModelId,
 						isAvailable: true,
 					};
 				} catch (error) {
 					return {
 						provider: "chrome",
 						model: null,
-						name: "gemini-nano",
+						name: modelName,
+						modelId: selectedModelId,
 						isAvailable: false,
 						error: error instanceof Error ? error.message : "Chrome Prompt API not available",
 					};
 				}
 			}
 		}
-	}, [options?.chromeCallbacks]);
+	}, [options?.modelId, options?.chromeCallbacks]);
 }

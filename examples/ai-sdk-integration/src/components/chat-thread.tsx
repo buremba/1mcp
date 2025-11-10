@@ -3,6 +3,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { MarkdownContent } from "./markdown/markdown-content";
+import { Spinner } from "./icons/spinner";
 
 interface ToolCall {
 	id: string;
@@ -184,7 +185,8 @@ export function ChatThread({ onSendMessage, messages, isGenerating }: ChatThread
 						))}
 						{isGenerating && (
 							<div className="mb-8">
-								<div className="flex items-center gap-2 text-muted-foreground">
+								<div className="flex items-center gap-3 text-muted-foreground">
+									<Spinner className="w-4 h-4" />
 									<div className="flex gap-1">
 										<div className="w-2 h-2 bg-muted-foreground/60 rounded-full animate-bounce" />
 										<div className="w-2 h-2 bg-muted-foreground/60 rounded-full animate-bounce [animation-delay:0.2s]" />

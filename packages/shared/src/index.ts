@@ -8,6 +8,9 @@ export * from "./types/index.js";
 // Export VFS interface
 export * from "./vfs/index.js";
 
+// Export QuickJS utilities
+export * from "./quickjs/index.js";
+
 // Export constants
 export * from "./constants.js";
 

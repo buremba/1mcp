@@ -1,21 +1,23 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useAIProvider } from "./hooks/use-ai-provider";
+import { useModelProvider } from "./hooks/use-model-provider";
 import { useAssistant } from "./hooks/use-assistant";
 import { useThreadStorage } from "./hooks/use-thread-storage";
+import { LocalStorageThreadStorage } from "./storage";
 import { ThreadSidebar } from "./components/thread-sidebar";
 import { ChatThread } from "./components/chat-thread";
 import { Select } from "./components/ui/select";
 import { browserTools } from "./tools/browser";
-import {
-	relayTools,
-	initializeRelay,
-	cleanupRelay,
-	getRelayStatus,
-} from "./tools/relay";
-import type { ChromeProviderCallbacks } from "@1mcp/ai-sdk/chrome";
+import { tool } from "ai";
+import { z } from "zod";
+import { getProviderIcon } from "./components/icons/provider-icons";
+import type { ChromeProviderCallbacks } from "./providers/chrome-provider";
 
 function App() {
 	const [relayConnected, setRelayConnected] = useState(false);
+	const [mcpTools, setMcpTools] = useState<Record<string, any>>({});
+	const [mcpCleanup, setMcpCleanup] = useState<(() => Promise<void>) | null>(null);
+	const [selectedModelId, setSelectedModelId] = useState<string | undefined>(undefined);
 
 	// Theme detection based on system preference
 	useEffect(() => {
@@ -33,14 +35,25 @@ function App() {
 		return () => darkModeMediaQuery.removeEventListener('change', updateTheme);
 	}, []);
 
+	// Initialize storage (can be swapped for RemoteThreadStorage)
+	const storage = useMemo(() => new LocalStorageThreadStorage(), []);
+
 	// Thread storage
 	const {
 		threads,
+		currentThread,
 		currentThreadId,
 		createThread,
+		updateThread,
 		selectThread,
 		deleteThread,
-	} = useThreadStorage();
+		loadMessages,
+		saveMessages,
+		isInitialized,
+	} = useThreadStorage(storage);
+
+	// Model provider hook
+	const modelProvider = useModelProvider({ mode: "local" });
 
 	// Tool tracking callbacks for Chrome provider
 	const chromeCallbacks: ChromeProviderCallbacks = {
@@ -55,14 +68,16 @@ function App() {
 		}, []),
 	};
 
-	// Get AI provider configuration
-	const providerConfig = useAIProvider({ chromeCallbacks });
+	// Get AI provider configuration (uses selectedModelId if set, otherwise default)
+	const providerConfig = useAIProvider({
+		modelId: selectedModelId || modelProvider.selectedModelId,
+		chromeCallbacks
+	});
 
-	// Prepare tools - only include relay tools if relay is connected AND initialized
-	const relayStatus = getRelayStatus();
+	// Prepare tools - only include MCP tools if relay is connected
 	const allTools = {
 		...browserTools,
-		...(relayConnected && relayStatus.connected ? relayTools : {}),
+		...(relayConnected ? mcpTools : {}),
 	};
 
 	// Generic assistant that works with any provider
@@ -73,10 +88,14 @@ function App() {
 
 	// Clean up auto-created "New Chat" threads on mount
 	useEffect(() => {
-		const autoCreatedThreads = threads.filter(t => t.title === "New Chat");
+		if (!isInitialized) return;
+
+		const autoCreatedThreads = threads.filter((t) => t.title === "New Chat");
 		if (autoCreatedThreads.length > 0) {
-			const shouldClearCurrent = autoCreatedThreads.some(t => t.id === currentThreadId);
-			autoCreatedThreads.forEach(thread => {
+			const shouldClearCurrent = autoCreatedThreads.some(
+				(t) => t.id === currentThreadId,
+			);
+			autoCreatedThreads.forEach((thread) => {
 				deleteThread(thread.id);
 			});
 			if (shouldClearCurrent) {
@@ -84,15 +103,161 @@ function App() {
 			}
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, []); // Only run once on mount
+	}, [isInitialized]); // Run once after initialization
 
-	// Initialize relay-mcp connection
+	// Initialize relay-mcp connection via MCP protocol
 	useEffect(() => {
 		const initRelay = async () => {
 			try {
-				await initializeRelay("http://127.0.0.1:7888");
+				console.log("Connecting to relay-mcp server via MCP protocol...");
+
+				const mcpUrl = "http://127.0.0.1:7888/mcp";
+
+				// Initialize MCP session
+				const initResponse = await fetch(mcpUrl, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						jsonrpc: "2.0",
+						id: 1,
+						method: "initialize",
+						params: {
+							protocolVersion: "2024-11-05",
+							capabilities: {},
+							clientInfo: {
+								name: "ai-sdk-integration",
+								version: "1.0.0"
+							}
+						}
+					})
+				});
+
+				const initResult = await initResponse.json();
+				console.log("MCP initialized:", initResult);
+
+				// Fetch tools list
+				const toolsResponse = await fetch(mcpUrl, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({
+						jsonrpc: "2.0",
+						id: 2,
+						method: "tools/list"
+					})
+				});
+
+				const toolsResult = await toolsResponse.json();
+				const mcpToolsList = toolsResult.result.tools;
+				console.log("MCP tools fetched:", mcpToolsList.map((t: any) => t.name));
+
+				// Helper function to convert JSON Schema to simple Zod (only top-level)
+				const jsonSchemaToZod = (jsonSchema: any): any => {
+					if (!jsonSchema || jsonSchema.type !== 'object') {
+						return z.object({});
+					}
+
+					const shape: Record<string, any> = {};
+					const properties = jsonSchema.properties || {};
+					const required = jsonSchema.required || [];
+
+					for (const [key, prop] of Object.entries(properties)) {
+						const propSchema = prop as any;
+						let zodType: any;
+
+						// Simplified conversion - avoid nested objects to prevent OpenAI schema validation errors
+						switch (propSchema.type) {
+							case 'string':
+								zodType = z.string();
+								if (propSchema.description) {
+									zodType = zodType.describe(propSchema.description);
+								}
+								break;
+							case 'number':
+								zodType = z.number();
+								if (propSchema.description) {
+									zodType = zodType.describe(propSchema.description);
+								}
+								break;
+							case 'boolean':
+								zodType = z.boolean();
+								if (propSchema.description) {
+									zodType = zodType.describe(propSchema.description);
+								}
+								break;
+							case 'array':
+								// Simple array of strings
+								zodType = z.array(z.string());
+								if (propSchema.description) {
+									zodType = zodType.describe(propSchema.description);
+								}
+								break;
+							case 'object':
+								// For objects, just use z.any() to avoid nested schema issues
+								zodType = z.any();
+								if (propSchema.description) {
+									zodType = zodType.describe(propSchema.description);
+								}
+								break;
+							default:
+								zodType = z.any();
+						}
+
+						// Make optional if not required
+						if (!required.includes(key)) {
+							zodType = zodType.optional();
+						}
+
+						shape[key] = zodType;
+					}
+
+					return z.object(shape);
+				};
+
+				// Convert MCP tools to AI SDK tools
+				const convertedTools: Record<string, any> = {};
+				for (const mcpTool of mcpToolsList) {
+					const zodSchema = jsonSchemaToZod(mcpTool.inputSchema);
+
+					convertedTools[mcpTool.name] = tool({
+						description: mcpTool.description,
+						inputSchema: zodSchema,
+						execute: async (args: any) => {
+							console.log(`Executing MCP tool: ${mcpTool.name}`, args);
+
+							const response = await fetch(mcpUrl, {
+								method: "POST",
+								headers: { "Content-Type": "application/json" },
+								body: JSON.stringify({
+									jsonrpc: "2.0",
+									id: Date.now(),
+									method: "tools/call",
+									params: {
+										name: mcpTool.name,
+										arguments: args
+									}
+								})
+							});
+
+							const result = await response.json();
+							console.log(`MCP tool ${mcpTool.name} result:`, result);
+
+							if (result.error) {
+								throw new Error(result.error.message);
+							}
+
+							// Extract text content from MCP response
+							if (result.result?.content?.[0]?.text) {
+								return result.result.content[0].text;
+							}
+
+							return JSON.stringify(result.result);
+						}
+					});
+				}
+
+				setMcpTools(convertedTools);
 				setRelayConnected(true);
-				console.log("Relay-MCP connected");
+				console.log("Relay-MCP connected via MCP protocol with tools:", Object.keys(convertedTools));
 			} catch (error) {
 				console.warn(
 					"Relay-MCP not available. Only browser tools will work.",
@@ -105,24 +270,40 @@ function App() {
 		initRelay();
 
 		return () => {
-			cleanupRelay();
+			// MCP cleanup if needed
+			if (mcpCleanup) {
+				mcpCleanup().catch(console.error);
+			}
 		};
 	}, []);
 
 
-	const handleCreateThread = () => {
-		createThread(`Chat ${threads.length + 1}`);
+	const handleCreateThread = async () => {
+		await createThread(
+			`Chat ${threads.length + 1}`,
+			providerConfig.modelId,
+		);
 		clearMessages();
 	};
 
-	const handleSelectThread = (id: string) => {
-		selectThread(id);
+	const handleSelectThread = async (id: string) => {
+		const thread = threads.find((t) => t.id === id);
+		if (!thread) return;
+
+		await selectThread(id);
+
+		// Update selected model to match thread's model
+		setSelectedModelId(thread.modelId);
+
+		// Load thread messages from storage
+		const messagePage = await loadMessages(id);
+		// TODO: Set loaded messages in assistant hook
+		// For now, just clear since we don't have setMessages yet
 		clearMessages();
-		// TODO: Load thread messages from storage
 	};
 
-	const handleDeleteThread = (id: string) => {
-		deleteThread(id);
+	const handleDeleteThread = async (id: string) => {
+		await deleteThread(id);
 		if (currentThreadId === id) {
 			clearMessages();
 		}
@@ -131,12 +312,44 @@ function App() {
 	const handleSendMessage = async (content: string) => {
 		// Create a new thread if none exists
 		if (!currentThreadId) {
-			const threadTitle = content.length > 50 ? content.substring(0, 50) + "..." : content;
-			createThread(threadTitle);
+			const threadTitle =
+				content.length > 50 ? content.substring(0, 50) + "..." : content;
+			await createThread(
+				threadTitle,
+				providerConfig.modelId,
+			);
 		}
-		
+
 		// Send the message
 		await sendMessage(content);
+	};
+
+	// Auto-save messages when they change
+	useEffect(() => {
+		if (!isInitialized || !currentThreadId || messages.length === 0) return;
+
+		// Debounce saving
+		const timeoutId = setTimeout(() => {
+			saveMessages(currentThreadId, messages).catch((error) => {
+				console.error("Failed to save messages:", error);
+			});
+		}, 1000);
+
+		return () => clearTimeout(timeoutId);
+	}, [messages, currentThreadId, isInitialized, saveMessages]);
+
+	// Sync provider dropdown when thread changes
+	useEffect(() => {
+		if (currentThread) {
+			setSelectedModelId(currentThread.modelId);
+		}
+	}, [currentThread]);
+
+	// Handle model switching
+	const handleModelChange = (newModelId: string) => {
+		setSelectedModelId(newModelId);
+		// Clear messages when switching models (optional behavior)
+		// clearMessages();
 	};
 
 	const renderStatusBadge = () => {
@@ -158,6 +371,7 @@ function App() {
 			<ThreadSidebar
 				threads={threads}
 				currentThreadId={currentThreadId}
+				generatingThreadId={isGenerating ? currentThreadId : null}
 				onSelectThread={handleSelectThread}
 				onCreateThread={handleCreateThread}
 				onDeleteThread={handleDeleteThread}
@@ -170,31 +384,20 @@ function App() {
 					<div className="flex items-center justify-between">
 						{/* Model Selector */}
 						<div className="relative inline-flex items-center">
-							<svg
-								xmlns="http://www.w3.org/2000/svg"
-								width="16"
-								height="16"
-								viewBox="0 0 24 24"
-								fill="none"
-								stroke="currentColor"
-								strokeWidth="2"
-								strokeLinecap="round"
-								strokeLinejoin="round"
-								className="text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none z-10"
-							>
-								<circle cx="12" cy="12" r="3" />
-								<path d="M12 1v6m0 6v6" />
-								<path d="m4.93 4.93 4.24 4.24m5.66 5.66 4.24 4.24" />
-								<path d="m19.07 4.93-4.24 4.24m-5.66 5.66-4.24 4.24" />
-							</svg>
+							{(() => {
+								const ProviderIcon = getProviderIcon(providerConfig.provider);
+								return <ProviderIcon className="text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none z-10" size={16} />;
+							})()}
 							<Select
-								value={providerConfig.provider}
-								className="pl-9 pr-8 w-auto min-w-[180px]"
-								disabled
+								value={providerConfig.modelId}
+								className="pl-9 pr-8 w-auto min-w-[240px]"
+								onChange={(e) => handleModelChange(e.target.value)}
 							>
-								<option value="chrome">Chrome AI ({providerConfig.provider === 'chrome' ? providerConfig.name : 'gemini-nano'})</option>
-								<option value="openai">OpenAI ({providerConfig.provider === 'openai' ? providerConfig.name : 'gpt-4o-mini'})</option>
-								<option value="anthropic">Claude ({providerConfig.provider === 'anthropic' ? providerConfig.name : 'claude-3-5-sonnet-20241022'})</option>
+								{modelProvider.models.map((model) => (
+									<option key={model.id} value={model.id} disabled={!model.enabled}>
+										{model.name} {!model.enabled && "(Not available)"}
+									</option>
+								))}
 							</Select>
 							<svg
 								xmlns="http://www.w3.org/2000/svg"

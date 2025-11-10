@@ -154,13 +154,13 @@ export function setupMcpEndpoint(
               },
               {
                 name: "read",
-                description: "Read the contents of a file",
+                description: `Read file contents from the workspace. Filesystem policy restricts access to: readonly=[${config.policy.filesystem.readonly.join(', ')}], writable=[${config.policy.filesystem.writable.join(', ')}]. Mounts: ${config.policy.filesystem.mounts?.map(m => `${m.source}→${m.target}`).join(', ') || 'none'}`,
                 inputSchema: {
                   type: "object",
                   properties: {
                     path: {
                       type: "string",
-                      description: "Absolute or relative path to the file to read",
+                      description: "Path relative to workspace root (use paths from mounted directories)",
                     },
                   },
                   required: ["path"],
@@ -168,13 +168,13 @@ export function setupMcpEndpoint(
               },
               {
                 name: "write",
-                description: "Write content to a file",
+                description: `Write content to a file in writable workspace areas. Writable paths: [${config.policy.filesystem.writable.join(', ')}]`,
                 inputSchema: {
                   type: "object",
                   properties: {
                     path: {
                       type: "string",
-                      description: "Absolute or relative path to the file to write",
+                      description: "Path relative to workspace root (must be in writable directory)",
                     },
                     content: {
                       type: "string",
@@ -186,13 +186,13 @@ export function setupMcpEndpoint(
               },
               {
                 name: "search",
-                description: "Search for files or content within files",
+                description: `Search for files or content within the workspace. Search scope limited to mounted directories: ${config.policy.filesystem.mounts?.map(m => m.target).join(', ') || config.policy.filesystem.readonly.join(', ')}`,
                 inputSchema: {
                   type: "object",
                   properties: {
                     path: {
                       type: "string",
-                      description: "Directory path to search in (defaults to current directory)",
+                      description: "Directory path to search in (relative to workspace, defaults to workspace root)",
                     },
                     pattern: {
                       type: "string",

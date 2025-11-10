@@ -137,7 +137,7 @@ export interface ChromeProviderCallbacks {
  * It provides a basic language model interface compatible with AI SDK.
  */
 export class ChromeLanguageModelProvider {
-	readonly specificationVersion = "v1" as const;
+	readonly specificationVersion = "v2" as const;
 	readonly provider = "chrome" as const;
 	readonly modelId: string;
 	readonly defaultObjectGenerationMode = "json" as const;
@@ -148,7 +148,6 @@ export class ChromeLanguageModelProvider {
 	constructor(modelId = "gemini-nano", callbacks?: ChromeProviderCallbacks) {
 		this.modelId = modelId;
 		this.callbacks = callbacks;
-
 		// Check if Chrome Prompt API is available
 		if (typeof window === "undefined" || !window.LanguageModel) {
 			throw new Error(
@@ -199,13 +198,25 @@ export class ChromeLanguageModelProvider {
 								// AI SDK tools expect (params, context) but we only have params
 								const result = await (tool.execute as any)(args);
 
+								console.log(`[Chrome Tool] ${tool.name} returned:`, result);
+
 								// Track COMPLETE
 								this.callbacks?.onToolCallComplete?.({
 									id: callId,
 									result
 								});
 
-								return JSON.stringify(result);
+								// Chrome needs strings - convert result to string
+								// If result is already a string, return as-is
+								// Otherwise JSON.stringify it
+								if (typeof result === 'string') {
+									console.log(`[Chrome Tool] Returning string directly: ${result}`);
+									return result;
+								}
+
+								const stringified = JSON.stringify(result);
+								console.log(`[Chrome Tool] Returning JSON stringified: ${stringified}`);
+								return stringified;
 							}
 
 							const errorResult = { error: "Tool execution not implemented" };
@@ -218,6 +229,8 @@ export class ChromeLanguageModelProvider {
 
 							return JSON.stringify(errorResult);
 						} catch (error) {
+							console.error(`[Chrome Tool] ${tool.name} error:`, error);
+
 							// Track ERROR
 							this.callbacks?.onToolCallError?.({
 								id: callId,
@@ -321,8 +334,54 @@ IMPORTANT:
 		};
 	}
 
-	async doStream(): Promise<Record<string, unknown>> {
-		throw new Error("Streaming is not yet supported by Chrome Prompt API");
+	async doStream(options: Record<string, unknown>): Promise<Record<string, unknown>> {
+		// Chrome Prompt API doesn't support native streaming yet,
+		// so we simulate it by chunking the response
+		const result = await this.doGenerate(options);
+		const text = (result as any).text || "";
+
+		// Create ReadableStream that yields AI SDK v2 event objects
+		const stream = new ReadableStream({
+			async start(controller) {
+				// Emit stream-start event
+				controller.enqueue({
+					type: 'stream-start',
+					warnings: [],
+				});
+
+				// Simulate streaming by yielding text chunks
+				const chunkSize = 5; // Characters per chunk
+				for (let i = 0; i < text.length; i += chunkSize) {
+					const textChunk = text.slice(i, i + chunkSize);
+
+					// Emit text-delta event for AI SDK v2
+					controller.enqueue({
+						type: 'text-delta',
+						delta: textChunk,
+					});
+
+					// Small delay to simulate streaming (can be removed for instant display)
+					await new Promise(resolve => setTimeout(resolve, 10));
+				}
+
+				// Emit finish event
+				controller.enqueue({
+					type: 'finish',
+					usage: {
+						inputTokens: 0,
+						outputTokens: 0,
+					},
+					finishReason: 'stop',
+				});
+
+				controller.close();
+			}
+		});
+
+		return {
+			stream,
+			warnings: [],
+		};
 	}
 }
 

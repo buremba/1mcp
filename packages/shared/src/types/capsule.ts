@@ -24,9 +24,10 @@ export interface EntryPoint {
 }
 
 export interface FSLayer {
-  id: "code" | "deps";
+  id: "code" | "deps" | string; // string allows "mount-{name}"
   sha256: string;
-  path: string; // e.g., "fs.code.zip"
+  path: string; // e.g., "fs.code.zip" or "fs.mount-workspace.zip"
+  target?: string; // VFS mount point (e.g., "/workspace")
 }
 
 export interface Policy {
@@ -44,9 +45,18 @@ export interface NetworkPolicy {
   maxRedirects: number;
 }
 
+export interface Mount {
+  source: string; // Local path or git URL
+  target: string; // VFS path (e.g., "/workspace")
+  type: "directory" | "git";
+  readonly: boolean;
+  gitRef?: string; // For git mounts: branch, tag, or commit SHA
+}
+
 export interface FilesystemPolicy {
   readonly: string[];
   writable: string[];
+  mounts?: Mount[]; // Optional mount configuration
 }
 
 export interface LimitsPolicy {
