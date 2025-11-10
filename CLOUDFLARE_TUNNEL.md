@@ -6,7 +6,24 @@ This directory contains a simple HTTP server and Cloudflare Tunnel setup.
 
 1. **cloudflared** - The Cloudflare Tunnel client (version 2025.11.1)
 2. **simple_server.py** - A simple Python HTTP server
-3. **start_tunnel.sh** - Script to start both the server and tunnel together
+3. **Quick tunnel scripts** - For temporary URLs (no setup required)
+4. **Persistent tunnel scripts** - For permanent URLs (requires Cloudflare account)
+
+## Tunnel Types: Quick vs Persistent
+
+### Quick Tunnel (Temporary)
+- ❌ **URL changes** - New random URL each time you start
+- ❌ **Not persistent** - URL dies when tunnel stops
+- ✅ **No setup** - No authentication required
+- ✅ **Instant** - Start immediately
+- 📝 **Best for:** Testing, demos, temporary shares
+
+### Persistent Tunnel (Permanent)
+- ✅ **Fixed URL** - Same URL every time
+- ✅ **Survives restarts** - URL stays alive
+- ✅ **Custom domains** - Use your own domain
+- ⚠️ **Requires setup** - Need Cloudflare account (free)
+- 📝 **Best for:** Production, permanent deployments
 
 ## Quick Start
 
@@ -18,28 +35,35 @@ python3 simple_server.py
 
 This starts the server on `http://localhost:8080`
 
-### Option 2: Run Server with Cloudflare Tunnel
+### Option 2: Quick Tunnel (Temporary URL)
 
 ```bash
-./start_tunnel.sh
+./run_quick_tunnel.sh
 ```
 
 This will:
 - Start the HTTP server on port 8080
-- Create a Cloudflare Tunnel that exposes it to the internet
-- Generate a temporary public URL (e.g., `https://random-name.trycloudflare.com`)
+- Create a temporary Cloudflare Tunnel
+- Generate a public URL (e.g., `https://random-words-1234.trycloudflare.com`)
+- **Note:** URL is different each time and dies when stopped
 
-The tunnel uses Cloudflare's "Quick Tunnel" feature which doesn't require authentication.
+### Option 3: Persistent Tunnel (Permanent URL)
 
-### Option 3: Manual Cloudflare Tunnel
-
+First-time setup (requires Cloudflare account):
 ```bash
-# Start your server first
-python3 simple_server.py
-
-# In another terminal, start the tunnel
-./cloudflared tunnel --url http://localhost:8080
+./setup_persistent_tunnel.sh
 ```
+
+Then run your tunnel anytime:
+```bash
+./run_persistent_tunnel.sh
+```
+
+Benefits:
+- Same URL every time
+- Survives restarts
+- Can use custom domain (e.g., `myapp.example.com`)
+- Production-ready
 
 ## About the Simple Server
 
@@ -92,8 +116,19 @@ For production use, you can create named tunnels with authentication:
 
 ## Files
 
+**Core Files:**
 - `cloudflared` - The tunnel client binary
 - `simple_server.py` - Python HTTP server
-- `start_tunnel.sh` - Combined startup script
-- `cloudflared.deb` - Original debian package (can be removed)
-- `cloudflared_extracted/` - Extracted files (can be removed)
+
+**Quick Tunnel (Temporary URLs):**
+- `run_quick_tunnel.sh` - Start quick tunnel (no setup needed)
+- `start_tunnel.sh` - Alias for run_quick_tunnel.sh
+
+**Persistent Tunnel (Permanent URLs):**
+- `setup_persistent_tunnel.sh` - One-time setup wizard
+- `run_persistent_tunnel.sh` - Run persistent tunnel
+- `cloudflared-config.yml` - Created during setup
+
+**Installation Artifacts (gitignored):**
+- `cloudflared.deb` - Original debian package
+- `cloudflared_extracted/` - Extracted files
