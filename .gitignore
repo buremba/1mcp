@@ -41,3 +41,7 @@ temp/
 # Compiled files in source directories
 packages/shared/src/**/*.js
 packages/shared/src/**/*.d.ts
+
+# Cloudflare tunnel installation artifacts
+cloudflared.deb
+cloudflared_extracted/
