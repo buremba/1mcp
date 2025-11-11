@@ -1,6 +1,6 @@
 # 1mcp - avoid context bloating
 
-1mcp lets agents compose MCP tool calls and run code safely via WASM, cutting token usage by up to 96%.
+1mcp lets agents compose MCP tool calls and run code safely via WASM, cutting token usage by [up to 96%](https://www.anthropic.com/engineering/code-execution-with-mcp).
 
 ## How It Works
 
@@ -88,8 +88,6 @@ Each MCP client session has a virtual filesystem (OPFS in the browser, or a sand
 - `write` – create or patch files with policy checks
 - `search` – scan files without loading entire directories
 
-**Example:**
-
 ```javascript
 // Execution 1
 const x = 42;
@@ -99,6 +97,16 @@ await write('/test.txt', 'hello');
 x; // ReferenceError - variables don't persist between executions
 await read('/test.txt'); // file persists - filesystem state is maintained
 ```
+
+
+## Why not just use Cloudflare/Vercel/Daytona sandboxes?
+
+- **Chained execution = fewer tokens.** Inspired by Anthropic’s [“Code Execution with MCP”](https://www.anthropic.com/engineering/code-execution-with-mcp) pattern, 1mcp runs whole tool chains in a single capsule, so you see the same ~96% token reduction without hand-wiring Cloudflare Workers or Vercel Functions per call.
+- **Capsules are just code.** You author TypeScript/JavaScript with whatever `npm` deps you want; 1mcp bundles them with esbuild and WASM, so there’s no provider-specific SDK (unlike Cloudflare/Vercel runtimes or Daytona sandboxes that expect their own APIs).
+- **Session-scoped policies.** Each agent session gets strict network, filesystem, and runtime limits, rather than the global project settings Cloudflare/Vercel/Daytona enforce.
+- **Browser execution to offload compute.** Capsules can run inside the client’s browser worker via SSE, letting you save server-side compute that Cloudflare/Vercel/Daytona would otherwise bill you for.
+- **Native AI SDK bridge.** `@1mcp/ai-sdk` turns AI SDK tools into MCP tools automatically—no extra glue code—so your agent stays inside the same execution story across backend and browser.
+
 
 ### Browser Integration
 
